@@ -21,7 +21,7 @@ export default function FanHome() {
       seed: userId,
       size: 128,
     });
-    return avatar.toDataUriSync();
+    return avatar.toDataUri();
   };
 
   // Get user avatar from localStorage or generate new one
