@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWebRTCAudio } from "@/utils/useWebRTCAudio";
 import { useParams } from "next/navigation";
 import { supabase } from "@/utils/supabase";
@@ -22,10 +22,13 @@ export default function AudioRoom() {
   const [fans, setFans] = useState([]);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
   // Mute state: host, guests
   const [hostMuted, setHostMuted] = useState(false);
   const [guestMuted, setGuestMuted] = useState([true, true]);
   const [audienceUpdating, setAudienceUpdating] = useState(false);
+  
+  const chatContainerRef = useRef(null);
 
   // Generate avatar based on user ID
   const generateAvatar = (userId) => {
@@ -71,9 +74,9 @@ export default function AudioRoom() {
     fetchUser();
   }, []);
 
-  // Fetch room data from Supabase
+  // Fetch room data from Supabase and then fetch host's user profile for avatar
   useEffect(() => {
-    async function fetchRoom() {
+    async function fetchRoomAndHost() {
       setLoading(true);
       const { data, error } = await supabase
         .from("rooms")
@@ -82,14 +85,26 @@ export default function AudioRoom() {
         .single();
       if (data) {
         setRoom(data);
+        // Fetch host's user profile for avatar
+        let hostAvatar = null;
+        let hostName = data.host_name || "Host";
+        if (data.host_id) {
+          const { data: hostProfile } = await supabase
+            .from('profiles')
+            .select('avatar_url, username')
+            .eq('id', data.host_id)
+            .single();
+          hostAvatar = hostProfile?.avatar_url || generateAvatar(data.host_id);
+          if (hostProfile?.username) hostName = hostProfile.username;
+        }
         setHost({
-          name: data.host_name || "Host Aditya",
-          avatar: data.profile_pic_url || generateAvatar(data.host_id || "host")
+          name: hostName,
+          avatar: hostAvatar || generateAvatar(data.host_id || "host")
         });
       }
       setLoading(false);
     }
-    if (roomId) fetchRoom();
+    if (roomId) fetchRoomAndHost();
   }, [roomId]);
 
   // Insert user into room_participants as audience if not already present
@@ -182,6 +197,137 @@ export default function AudioRoom() {
     };
   }, [roomId]);
 
+  // Fetch messages from Supabase
+  useEffect(() => {
+    if (!roomId) return;
+
+    async function fetchMessages() {
+      console.log('Fetching messages for room:', roomId);
+      try {
+        const { data, error } = await supabase
+          .from('room_messages')
+          .select('*')
+          .eq('room_id', roomId)
+          .order('created_at', { ascending: true })
+          .limit(100);
+
+        if (error) {
+          console.error('Error fetching messages:', error);
+          // If table doesn't exist, use local messages as fallback
+          if (error.code === '42P01') { // Table doesn't exist
+            console.log('room_messages table not found, using local messages');
+            return;
+          }
+          return;
+        }
+
+        if (data) {
+          console.log('Fetched messages:', data);
+          // Get all unique user IDs
+          const userIds = [...new Set(data.map(msg => msg.user_id))];
+          
+          // Fetch usernames for all users
+          const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('id, username')
+            .in('id', userIds);
+          
+          // Create a map of user ID to username
+          const usernameMap = {};
+          if (profiles) {
+            profiles.forEach(profile => {
+              usernameMap[profile.id] = profile.username;
+            });
+          }
+
+          const formattedMessages = data.map(msg => ({
+            id: msg.id,
+            user: usernameMap[msg.user_id] || 'Unknown User',
+            text: msg.message,
+            timestamp: msg.created_at,
+            userId: msg.user_id,
+            avatar: getUserAvatar(msg.user_id)
+          }));
+          setMessages(formattedMessages);
+        }
+      } catch (err) {
+        console.error('Exception fetching messages:', err);
+      }
+    }
+
+    fetchMessages();
+
+    // Set up real-time subscription for messages
+    const messageSubscription = supabase
+      .channel(`room_${roomId}_messages`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'room_messages',
+          filter: `room_id=eq.${roomId}`
+        },
+        async (payload) => {
+          console.log('New message received:', payload);
+          try {
+            // Fetch the new message
+            const { data: newMessage, error } = await supabase
+              .from('room_messages')
+              .select('*')
+              .eq('id', payload.new.id)
+              .single();
+
+            if (newMessage) {
+              // Fetch username for the new message
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('username')
+                .eq('id', newMessage.user_id)
+                .single();
+
+              const formattedMessage = {
+                id: newMessage.id,
+                user: profile?.username || 'Unknown User',
+                text: newMessage.message,
+                timestamp: newMessage.created_at,
+                userId: newMessage.user_id,
+                avatar: getUserAvatar(newMessage.user_id)
+              };
+              setMessages(prev => [...prev, formattedMessage]);
+            }
+          } catch (err) {
+            console.error('Error processing new message:', err);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'room_messages',
+          filter: `room_id=eq.${roomId}`
+        },
+        (payload) => {
+          console.log('Message deleted:', payload);
+          setMessages(prev => prev.filter(msg => msg.id !== payload.old.id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      messageSubscription.unsubscribe();
+    };
+  }, [roomId]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   // Cleanup when user leaves room
   useEffect(() => {
     const handleBeforeUnload = async () => {
@@ -195,17 +341,8 @@ export default function AudioRoom() {
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      // Also cleanup when component unmounts
-      if (currentUser && roomId) {
-        supabase
-          .from('room_participants')
-          .delete()
-          .eq('room_id', roomId)
-          .eq('user_id', currentUser.id);
-      }
     };
   }, [currentUser, roomId]);
 
@@ -288,12 +425,136 @@ export default function AudioRoom() {
     });
   }
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (chatInput.trim()) {
-      setMessages([...messages, { user: currentUser.name, text: chatInput }]);
-      setChatInput("");
+    if (!chatInput.trim() || !currentUser?.id || !roomId || sendingMessage) return;
+
+    console.log('Sending message:', { roomId, userId: currentUser.id, message: chatInput.trim() });
+
+    try {
+      setSendingMessage(true);
+      const { data, error } = await supabase
+        .from('room_messages')
+        .insert({
+          room_id: roomId,
+          user_id: currentUser.id,
+          message: chatInput.trim()
+        })
+        .select();
+
+      if (error) {
+        console.error('Error sending message:', error);
+        // If table doesn't exist, use local messages as fallback
+        if (error.code === '42P01') {
+          console.log('room_messages table not found, using local message fallback');
+          const localMessage = {
+            id: Date.now(),
+            user: currentUser.name,
+            text: chatInput.trim(),
+            timestamp: new Date().toISOString(),
+            userId: currentUser.id,
+            avatar: currentUser.avatar
+          };
+          setMessages(prev => [...prev, localMessage]);
+          setChatInput("");
+          return;
+        }
+        alert('Failed to send message. Please try again.');
+      } else {
+        console.log('Message sent successfully:', data);
+        setChatInput("");
+      }
+    } catch (error) {
+      console.error('Exception sending message:', error);
+      alert('Failed to send message. Please try again.');
+    } finally {
+      setSendingMessage(false);
     }
+  };
+
+  const deleteMessage = async (messageId) => {
+    if (!currentUser?.id) {
+      console.log('No current user found');
+      return;
+    }
+
+    console.log('Attempting to delete message:', { messageId, userId: currentUser.id });
+
+    try {
+      // First, let's check if the message exists and belongs to the user
+      const { data: messageCheck, error: checkError } = await supabase
+        .from('room_messages')
+        .select('id, user_id')
+        .eq('id', messageId)
+        .single();
+
+      if (checkError) {
+        console.error('Error checking message:', checkError);
+        // If table doesn't exist, handle local message deletion
+        if (checkError.code === '42P01') {
+          console.log('room_messages table not found, handling local message deletion');
+          setMessages(prev => prev.filter(msg => msg.id !== messageId));
+          return;
+        }
+        alert('Message not found or you cannot delete this message.');
+        return;
+      }
+
+      if (!messageCheck) {
+        console.log('Message not found');
+        alert('Message not found.');
+        return;
+      }
+
+      console.log('Message found:', messageCheck);
+      console.log('Comparing user IDs:', { messageUserId: messageCheck.user_id, currentUserId: currentUser.id });
+
+      // Check if the message belongs to the current user
+      if (messageCheck.user_id !== currentUser.id) {
+        console.log('User ID mismatch - cannot delete this message');
+        alert('You can only delete your own messages.');
+        return;
+      }
+
+      // Now delete the message
+      const { data, error } = await supabase
+        .from('room_messages')
+        .delete()
+        .eq('id', messageId);
+
+      if (error) {
+        console.error('Error deleting message:', error);
+        alert('Failed to delete message. Please try again.');
+      } else {
+        console.log('Message deleted successfully:', data);
+        // Also remove from local state immediately for better UX
+        setMessages(prev => prev.filter(msg => msg.id !== messageId));
+      }
+    } catch (error) {
+      console.error('Exception deleting message:', error);
+      alert('Failed to delete message. Please try again.');
+    }
+  };
+
+  const addUserToStageFromMessage = (userId, username, avatar) => {
+    // Only add if there is an empty guest slot and user is not already on stage
+    if (!isHost) return;
+    if (guests.some(g => g && g.id === userId)) return;
+    const emptyIdx = guests.findIndex((g) => !g);
+    if (emptyIdx === -1) return;
+    const newGuests = [...guests];
+    newGuests[emptyIdx] = {
+      id: userId,
+      name: username,
+      avatar: avatar
+    };
+    setGuests(newGuests);
+    setGuestMuted((m) => {
+      const arr = [...m];
+      arr[emptyIdx] = true;
+      return arr;
+    });
+    setFans(fans.filter((f) => f.id !== userId));
   };
 
   return (
@@ -313,7 +574,7 @@ export default function AudioRoom() {
         }}
       >
             {/* Host Card */}
-            <div className="bg-[#232b38]/70 rounded-2xl shadow-lg flex flex-col items-center py-6 px-4 w-64 border border-[#33415c]">
+            <div className="bg-[#232b38]/70 rounded-2xl shadow-lg flex flex-col items-center py-6 px-4 w-58 h-47 border border-[#33415c]">
               <img src={host.avatar || "/default-avatar.png"} alt={host.name} className="w-20 h-20 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
               <div className="flex items-center gap-2 mt-2">
                 <span className="text-xl font-bold text-white">{host.name} <span className="text-red-400">{room.host_name === "Harshit Tiwari" ? "❤️" : ""}</span></span>
@@ -325,10 +586,10 @@ export default function AudioRoom() {
             {/* Guest/Stage Slots */}
             <div className="flex gap-6 w-full justify-center">
               {/* Guest Slot 1 */}
-              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-6 px-4 w-48 border border-[#33415c]">
+              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-6 px-4 w-47 h-44 border border-[#33415c]">
                 {guests[0] ? (
                   <>
-                    <img src={guests[0].avatar || "/default-avatar.png"} alt={guests[0].name} className="w-16 h-16 rounded-full object-cover mb-2" />
+                    <img src={guests[0].avatar || "/default-avatar.png"} alt={guests[0].name} className="w-16 h-16 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
                     <span className="text-white font-semibold text-base">{guests[0].name}</span>
                     <span className="bg-[#2ecc71] text-white text-xs font-bold px-3 py-1 rounded-full mt-1">LV.</span>
                   </>
@@ -342,10 +603,10 @@ export default function AudioRoom() {
                 )}
               </div>
               {/* Guest Slot 2 */}
-              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-6 px-4 w-48 border border-[#33415c]">
+              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-6 px-4 w-47 h-44 border border-[#33415c]">
                 {guests[1] ? (
                   <>
-                    <img src={guests[1].avatar || "/default-avatar.png"} alt={guests[1].name} className="w-16 h-16 rounded-full object-cover mb-2" />
+                    <img src={guests[1].avatar || "/default-avatar.png"} alt={guests[1].name} className="w-16 h-16 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
                     <span className="text-white font-semibold text-base">{guests[1].name}</span>
                     <span className="bg-[#2ecc71] text-white text-xs font-bold px-3 py-1 rounded-full mt-1">LV.</span>
                   </>
@@ -389,7 +650,7 @@ export default function AudioRoom() {
         </div>
 
           {/* Audience */}
-          <div className="bg-[#2a475e] p-6 rounded-xl border border-gray-700">
+          <div className="bg-[#2a475e] p-6 rounded-xl border border-gray-700 mb-8">
             <div className="flex items-center gap-2 mb-4">
               <h2 className="text-lg font-bold text-white">👥 Audience ({fans.length})</h2>
               {audienceUpdating && (
@@ -411,23 +672,60 @@ export default function AudioRoom() {
         </div>
 
         {/* Right Column (Chat) */}
-        <div className="col-span-1 bg-[#2a475e] rounded-xl flex flex-col border border-gray-700">
+        <div className="col-span-1 bg-[#2a475e] rounded-xl flex flex-col border border-gray-700 mb-8">
           <div className="p-4 border-b border-gray-700">
             <h2 className="text-lg font-bold text-white">💬 Chat</h2>
           </div>
-          <div className="flex-grow p-4 overflow-y-auto">
+          <div 
+            ref={chatContainerRef}
+            className="h-[650px] p-4 overflow-y-auto hide-scrollbar"
+          >
             {/* Messages */}
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
               {messages.map((msg, idx) => (
-                 <div key={idx} className={`flex gap-2 ${msg.user === currentUser.name ? 'justify-end' : ''}`}>
-                   <div className={`rounded-lg p-3 max-w-xs ${msg.user === currentUser.name ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838]'}`}>
-                     <p className="text-sm font-bold">{msg.user}</p>
-                     <p className="text-sm">{msg.text}</p>
-                   </div>
-                 </div>
-              ))}
-               {messages.length === 0 && (
-                <p className="text-center text-sm text-[#8f98a0]">No messages yet.</p>
+                <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
+                  {msg.userId !== currentUser?.id && (
+                    <img 
+                      src={msg.avatar || "/default-avatar.png"} 
+                      alt={msg.user} 
+                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                    />
+                  )}
+                  <div className={`rounded-lg p-3 max-w-xs relative group ${msg.userId === currentUser?.id ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838] text-[#c7d5e0]'}`}>
+                    {msg.userId !== currentUser?.id && (
+                      <p className="text-xs font-bold text-[#66c0f4] mb-1">{msg.user}</p>
+                    )}
+                    {msg.userId === currentUser?.id && (
+                      <p className="text-xs font-bold text-white mb-1">You</p>
+                    )}
+                    <p className="text-sm">{msg.text}</p>
+                    {/* Delete button for user's own messages */}
+                    {msg.userId === currentUser?.id && (
+                <button
+                        onClick={() => deleteMessage(msg.id)}
+                        className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete message"
+                >
+                        ×
+                </button>
+              )}
+                    {/* Add to Stage button for host on other users' messages */}
+                    {isHost && msg.userId !== currentUser?.id && (
+                <button
+                        onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
+                        className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        title="Add to Stage"
+                >
+                        Add to Stage
+                </button>
+              )}
+                  </div>
+            </div>
+          ))}
+              {messages.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-sm text-[#8f98a0]">No messages yet. Start the conversation!</p>
+      </div>
               )}
             </div>
           </div>
@@ -438,13 +736,15 @@ export default function AudioRoom() {
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Type a message..."
-                className="flex-grow bg-[#1b2838] border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#66c0f4]"
+                disabled={sendingMessage}
+                className="flex-grow bg-[#1b2838] border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#66c0f4] disabled:opacity-50"
               />
               <button
                 type="submit"
-                className="px-6 py-2 bg-[#4f94bc] text-white rounded-lg hover:bg-[#66c0f4] transition-colors"
+                disabled={sendingMessage || !chatInput.trim()}
+                className="px-6 py-2 bg-[#4f94bc] text-white rounded-lg hover:bg-[#66c0f4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Send
+                {sendingMessage ? 'Sending...' : 'Send'}
               </button>
             </form>
           </div>
