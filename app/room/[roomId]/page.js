@@ -129,24 +129,26 @@ export default function AudioRoom() {
     joinAudience();
   }, [currentUser?.id, roomId]);
 
-  // Fetch audience from room_participants and get usernames from profiles table
+  // Real-time audience sync: listen for changes to room_participants and update fans array
   useEffect(() => {
     if (!roomId) return;
+    let isMounted = true;
 
     async function fetchAudience() {
       // Get all audience user_ids
-      const { data: audienceRows, error: audienceError } = await supabase
+      const { data: audienceRows } = await supabase
         .from('room_participants')
         .select('user_id')
         .eq('room_id', roomId)
         .eq('role_in_room', 'audience');
-      if (!audienceRows || audienceRows.length === 0) {
+      if (!isMounted) return;
+      // Fetch all profiles in one query
+      const userIds = audienceRows?.map(row => row.user_id) || [];
+      if (userIds.length === 0) {
         setFans([]);
         return;
       }
-      // Fetch all profiles in one query
-      const userIds = audienceRows.map(row => row.user_id);
-      const { data: profiles, error: profilesError } = await supabase
+      const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
@@ -165,35 +167,29 @@ export default function AudioRoom() {
         }))
       );
     }
+
     fetchAudience();
 
-    // Set up real-time subscription (no filter property)
-    const subscription = supabase
-      .channel(`room_${roomId}_audience`)
+    // Real-time subscription
+    const audienceSub = supabase
+      .channel(`room_${roomId}_audience_sync`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'room_participants',
+          filter: `room_id=eq.${roomId}`
         },
         async (payload) => {
-          // Only refetch if the change is for this room and audience
-          if (
-            (payload.new && payload.new.room_id === roomId && payload.new.role_in_room === 'audience') ||
-            (payload.old && payload.old.room_id === roomId && payload.old.role_in_room === 'audience')
-          ) {
-            setAudienceUpdating(true);
-            await fetchAudience();
-            setAudienceUpdating(false);
-          }
+          await fetchAudience();
         }
       )
       .subscribe();
 
-    // Cleanup subscription on unmount
     return () => {
-      subscription.unsubscribe();
+      isMounted = false;
+      audienceSub.unsubscribe();
     };
   }, [roomId]);
 
@@ -436,39 +432,90 @@ export default function AudioRoom() {
     }
   };
 
-  const addUserToStageFromMessage = (userId, username, avatar) => {
-    const emptyIdx = guests.findIndex((g) => !g);
-    if (emptyIdx === -1) return;
-    
-    const newGuests = [...guests];
-    newGuests[emptyIdx] = {
-      name: username,
-      avatar: avatar,
-      id: userId
-    };
-    setGuests(newGuests);
-    setGuestMuted((m) => {
-      const arr = [...m];
-      arr[emptyIdx] = true;
-      return arr;
-    });
-    setFans(fans.filter((f) => f.id !== userId));
-  };
-
-  // Add this function to handle removing a user from stage
-  function removeUserFromStageFromMessage(userId) {
-    const idx = guests.findIndex(g => g && g.id === userId);
-    if (idx === -1) return;
-    setFans([...fans, guests[idx]]);
-    const newGuests = [...guests];
-    newGuests[idx] = null;
-    setGuests(newGuests);
-    setGuestMuted((m) => {
-      const arr = [...m];
-      arr[idx] = true;
-      return arr;
-    });
+  // Add user to stage (host action)
+  async function addUserToStageFromMessage(userId, username, avatar) {
+    // Update DB: set role_in_room to 'stage'
+    await supabase
+      .from('room_participants')
+      .update({ role_in_room: 'stage' })
+      .eq('room_id', roomId)
+      .eq('user_id', userId);
   }
+
+  // Remove user from stage (host action)
+  async function removeUserFromStageFromMessage(userId) {
+    // Update DB: set role_in_room to 'audience'
+    await supabase
+      .from('room_participants')
+      .update({ role_in_room: 'audience' })
+      .eq('room_id', roomId)
+      .eq('user_id', userId);
+  }
+
+  // Real-time stage sync: listen for changes to room_participants and update guests array
+  useEffect(() => {
+    if (!roomId) return;
+    let isMounted = true;
+
+    async function fetchStage() {
+      // Get all users on stage
+      const { data: stageRows } = await supabase
+        .from('room_participants')
+        .select('user_id')
+        .eq('room_id', roomId)
+        .eq('role_in_room', 'stage');
+      if (!isMounted) return;
+      // Fetch all profiles in one query
+      const userIds = stageRows?.map(row => row.user_id) || [];
+      if (userIds.length === 0) {
+        setGuests([null, null]);
+        return;
+      }
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .in('id', userIds);
+      // Map userId to profile
+      const profileMap = {};
+      if (profiles) {
+        for (const p of profiles) {
+          profileMap[p.id] = p;
+        }
+      }
+      // Fill up to 2 guest slots
+      const guestList = userIds.slice(0, 2).map(uid => ({
+        name: profileMap[uid]?.username || 'Unknown',
+        avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
+        id: uid,
+      }));
+      while (guestList.length < 2) guestList.push(null);
+      setGuests(guestList);
+    }
+
+    fetchStage();
+
+    // Real-time subscription
+    const stageSub = supabase
+      .channel(`room_${roomId}_stage_sync`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'room_participants',
+          filter: `room_id=eq.${roomId}`
+        },
+        async (payload) => {
+          await fetchStage();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      stageSub.unsubscribe();
+    };
+  }, [roomId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#1b2838] to-[#2a475e] p-8 text-[#c7d5e0]">
