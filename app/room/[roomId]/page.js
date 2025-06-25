@@ -199,25 +199,16 @@ export default function AudioRoom() {
 
   // Fetch messages from Supabase
   useEffect(() => {
-    if (!roomId) return;
-
     async function fetchMessages() {
-      console.log('Fetching messages for room:', roomId);
       try {
         const { data, error } = await supabase
           .from('room_messages')
           .select('*')
           .eq('room_id', roomId)
-          .order('created_at', { ascending: true })
-          .limit(100);
+          .order('created_at', { ascending: true });
 
         if (error) {
           console.error('Error fetching messages:', error);
-          // If table doesn't exist, use local messages as fallback
-          if (error.code === '42P01') { // Table doesn't exist
-            console.log('room_messages table not found, using local messages');
-            return;
-          }
           return;
         }
 
@@ -361,7 +352,12 @@ export default function AudioRoom() {
     error: audioError,
     audioRefs,
     userId: myUserId,
-  } = useWebRTCAudio({ roomId, isOnStage });
+    isMuted,
+    toggleMute,
+    isConnecting,
+    audioLevels,
+    roomUsers
+  } = useWebRTCAudio({ roomId, isOnStage, currentUserId: currentUser?.id });
 
   if (loading) return <div>Loading...</div>;
   if (!room) return <div>Room not found</div>;
@@ -393,14 +389,62 @@ export default function AudioRoom() {
       return arr;
     });
   }
-  // Fan requests to join stage
-  function joinStage() {
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !currentUser?.id || sendingMessage) return;
+
+    setSendingMessage(true);
+    try {
+      const { error } = await supabase
+        .from('room_messages')
+        .insert({
+          room_id: roomId,
+          user_id: currentUser.id,
+          message: chatInput.trim()
+        });
+
+      if (error) {
+        console.error('Error sending message:', error);
+        alert('Failed to send message');
+      } else {
+        setChatInput('');
+      }
+    } catch (err) {
+      console.error('Exception sending message:', err);
+      alert('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const deleteMessage = async (messageId) => {
+    try {
+      const { error } = await supabase
+        .from('room_messages')
+        .delete()
+        .eq('id', messageId)
+        .eq('user_id', currentUser.id); // Only allow users to delete their own messages
+
+      if (error) {
+        console.error('Error deleting message:', error);
+        alert('Failed to delete message');
+      }
+    } catch (err) {
+      console.error('Exception deleting message:', err);
+      alert('Failed to delete message');
+    }
+  };
+
+  const addUserToStageFromMessage = (userId, username, avatar) => {
     const emptyIdx = guests.findIndex((g) => !g);
     if (emptyIdx === -1) return;
+    
     const newGuests = [...guests];
     newGuests[emptyIdx] = {
-      name: currentUser.name,
-      avatar: currentUser.avatar
+      name: username,
+      avatar: avatar,
+      id: userId
     };
     setGuests(newGuests);
     setGuestMuted((m) => {
@@ -408,11 +452,12 @@ export default function AudioRoom() {
       arr[emptyIdx] = true;
       return arr;
     });
-    setFans(fans.filter((f) => f.name !== currentUser.name));
-  }
-  // Fan leaves stage
-  function leaveStage() {
-    const idx = guests.findIndex((g) => g && g.name === currentUser.name);
+    setFans(fans.filter((f) => f.id !== userId));
+  };
+
+  // Add this function to handle removing a user from stage
+  function removeUserFromStageFromMessage(userId) {
+    const idx = guests.findIndex(g => g && g.id === userId);
     if (idx === -1) return;
     setFans([...fans, guests[idx]]);
     const newGuests = [...guests];
@@ -425,140 +470,19 @@ export default function AudioRoom() {
     });
   }
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!chatInput.trim() || !currentUser?.id || !roomId || sendingMessage) return;
-
-    console.log('Sending message:', { roomId, userId: currentUser.id, message: chatInput.trim() });
-
-    try {
-      setSendingMessage(true);
-      const { data, error } = await supabase
-        .from('room_messages')
-        .insert({
-          room_id: roomId,
-          user_id: currentUser.id,
-          message: chatInput.trim()
-        })
-        .select();
-
-      if (error) {
-        console.error('Error sending message:', error);
-        // If table doesn't exist, use local messages as fallback
-        if (error.code === '42P01') {
-          console.log('room_messages table not found, using local message fallback');
-          const localMessage = {
-            id: Date.now(),
-            user: currentUser.name,
-            text: chatInput.trim(),
-            timestamp: new Date().toISOString(),
-            userId: currentUser.id,
-            avatar: currentUser.avatar
-          };
-          setMessages(prev => [...prev, localMessage]);
-          setChatInput("");
-          return;
-        }
-        alert('Failed to send message. Please try again.');
-      } else {
-        console.log('Message sent successfully:', data);
-        setChatInput("");
-      }
-    } catch (error) {
-      console.error('Exception sending message:', error);
-      alert('Failed to send message. Please try again.');
-    } finally {
-      setSendingMessage(false);
-    }
-  };
-
-  const deleteMessage = async (messageId) => {
-    if (!currentUser?.id) {
-      console.log('No current user found');
-      return;
-    }
-
-    console.log('Attempting to delete message:', { messageId, userId: currentUser.id });
-
-    try {
-      // First, let's check if the message exists and belongs to the user
-      const { data: messageCheck, error: checkError } = await supabase
-        .from('room_messages')
-        .select('id, user_id')
-        .eq('id', messageId)
-        .single();
-
-      if (checkError) {
-        console.error('Error checking message:', checkError);
-        // If table doesn't exist, handle local message deletion
-        if (checkError.code === '42P01') {
-          console.log('room_messages table not found, handling local message deletion');
-          setMessages(prev => prev.filter(msg => msg.id !== messageId));
-          return;
-        }
-        alert('Message not found or you cannot delete this message.');
-        return;
-      }
-
-      if (!messageCheck) {
-        console.log('Message not found');
-        alert('Message not found.');
-        return;
-      }
-
-      console.log('Message found:', messageCheck);
-      console.log('Comparing user IDs:', { messageUserId: messageCheck.user_id, currentUserId: currentUser.id });
-
-      // Check if the message belongs to the current user
-      if (messageCheck.user_id !== currentUser.id) {
-        console.log('User ID mismatch - cannot delete this message');
-        alert('You can only delete your own messages.');
-        return;
-      }
-
-      // Now delete the message
-      const { data, error } = await supabase
-        .from('room_messages')
-        .delete()
-        .eq('id', messageId);
-
-      if (error) {
-        console.error('Error deleting message:', error);
-        alert('Failed to delete message. Please try again.');
-      } else {
-        console.log('Message deleted successfully:', data);
-        // Also remove from local state immediately for better UX
-        setMessages(prev => prev.filter(msg => msg.id !== messageId));
-      }
-    } catch (error) {
-      console.error('Exception deleting message:', error);
-      alert('Failed to delete message. Please try again.');
-    }
-  };
-
-  const addUserToStageFromMessage = (userId, username, avatar) => {
-    // Only add if there is an empty guest slot and user is not already on stage
-    if (!isHost) return;
-    if (guests.some(g => g && g.id === userId)) return;
-    const emptyIdx = guests.findIndex((g) => !g);
-    if (emptyIdx === -1) return;
-    const newGuests = [...guests];
-    newGuests[emptyIdx] = {
-      id: userId,
-      name: username,
-      avatar: avatar
-    };
-    setGuests(newGuests);
-    setGuestMuted((m) => {
-      const arr = [...m];
-      arr[emptyIdx] = true;
-      return arr;
-    });
-    setFans(fans.filter((f) => f.id !== userId));
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#1b2838] to-[#2a475e] p-8 text-[#c7d5e0]">
+      {/* Hidden audio elements for WebRTC streams */}
+      {peers.map(({ id, stream }) => (
+        <audio
+          key={id}
+          ref={(el) => (audioRefs.current[id] = el)}
+          autoPlay
+          playsInline
+          muted={false}
+        />
+      ))}
+
       <div className="grid grid-cols-3 gap-8 h-full">
         {/* Left Column */}
         <div className="col-span-2 flex flex-col gap-8">
@@ -574,51 +498,144 @@ export default function AudioRoom() {
         }}
       >
             {/* Host Card */}
-            <div className="bg-[#232b38]/70 rounded-2xl shadow-lg flex flex-col items-center py-6 px-4 w-58 h-47 border border-[#33415c]">
-              <img src={host.avatar || "/default-avatar.png"} alt={host.name} className="w-20 h-20 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
+            <div className="bg-[#232b38]/70 rounded-2xl shadow-lg flex flex-col items-center py-4 px-3 w-48 h-42 border border-[#33415c] relative">
+              <img src={host.avatar || "/default-avatar.png"} alt={host.name} className="w-16 h-16 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
               <div className="flex items-center gap-2 mt-2">
                 <span className="text-xl font-bold text-white">{host.name} <span className="text-red-400">{room.host_name === "Harshit Tiwari" ? "❤️" : ""}</span></span>
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="bg-[#2ecc71] text-white text-xs font-bold px-3 py-1 rounded-full">Host</span>
               </div>
+              
+              {/* Audio Controls for Host */}
+              {isHost && isOnStage && (
+                <div className="absolute top-2 right-2 flex gap-2">
+                  <button
+                    onClick={toggleMute}
+                    className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors text-2xl ${
+                      isMuted 
+                        ? 'bg-red-500 hover:bg-red-600' 
+                        : 'bg-green-500 hover:bg-green-600'
+                    }`}
+                    title={isMuted ? 'Unmute' : 'Mute'}
+                  >
+                    {isMuted ? '🔇' : '🎤'}
+                  </button>
+                  {isConnecting && (
+                    <div className="p-2 bg-yellow-500 rounded-full animate-pulse">
+                      🔄
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Audio Level Indicator (no digit shown, just bar) */}
+              {isHost && isOnStage && audioLevels[currentUser?.id] > 0 && (
+                <div className="absolute bottom-2 left-2 w-8 h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-green-400 transition-all duration-100"
+                    style={{ width: `${Math.min(audioLevels[currentUser?.id] / 2, 100)}%` }}
+                  />
+                </div>
+              )}
             </div>
+            
             {/* Guest/Stage Slots */}
-            <div className="flex gap-6 w-full justify-center">
+            <div className="flex gap-10 w-full justify-center">
               {/* Guest Slot 1 */}
-              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-6 px-4 w-47 h-44 border border-[#33415c]">
+              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-4 px-3 w-36 h-33 border border-[#33415c] relative">
                 {guests[0] ? (
                   <>
-                    <img src={guests[0].avatar || "/default-avatar.png"} alt={guests[0].name} className="w-16 h-16 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
+                    <img src={guests[0].avatar || "/default-avatar.png"} alt={guests[0].name} className="w-12 h-12 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
                     <span className="text-white font-semibold text-base">{guests[0].name}</span>
                     <span className="bg-[#2ecc71] text-white text-xs font-bold px-3 py-1 rounded-full mt-1">LV.</span>
+                    
+                    {/* Audio Controls for Guest 1 */}
+                    {guests[0].id === currentUser?.id && isOnStage && (
+                      <div className="absolute top-2 right-2">
+                        <button
+                          onClick={toggleMute}
+                          className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors text-xl ${
+                            isMuted 
+                              ? 'bg-red-500 hover:bg-red-600' 
+                              : 'bg-green-500 hover:bg-green-600'
+                          }`}
+                          title={isMuted ? 'Unmute' : 'Mute'}
+                        >
+                          {isMuted ? '🔇' : '🎤'}
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* Audio Level Indicator for Guest 1 */}
+                    {guests[0].id === currentUser?.id && isOnStage && audioLevels[currentUser?.id] && (
+                      <div className="absolute bottom-2 left-2 w-6 h-1 bg-gray-700 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-green-400 transition-all duration-100"
+                          style={{ width: `${Math.min(audioLevels[currentUser?.id] / 2, 100)}%` }}
+                        />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full">
-                    <div className="w-16 h-16 rounded-full bg-[#33415c]/70 flex items-center justify-center mb-2">
-                      <svg width="32" height="32" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#8f98a0" opacity="0.2"/><path d="M8 12h8M12 8v8" stroke="#8f98a0" strokeWidth="2" strokeLinecap="round"/></svg>
+                    <div className="w-12 h-12 rounded-full bg-[#33415c]/70 flex items-center justify-center mb-2">
+                      <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#8f98a0" opacity="0.2"/><path d="M8 12h8M12 8v8" stroke="#8f98a0" strokeWidth="2" strokeLinecap="round"/></svg>
                     </div>
                     <span className="text-[#8f98a0] text-base font-semibold">Host will add you</span>
                   </div>
                 )}
               </div>
+              
               {/* Guest Slot 2 */}
-              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-6 px-4 w-47 h-44 border border-[#33415c]">
+              <div className="bg-[#232b38]/70 rounded-2xl shadow flex flex-col items-center py-4 px-3 w-36 h-33 border border-[#33415c] relative">
                 {guests[1] ? (
                   <>
-                    <img src={guests[1].avatar || "/default-avatar.png"} alt={guests[1].name} className="w-16 h-16 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
+                    <img src={guests[1].avatar || "/default-avatar.png"} alt={guests[1].name} className="w-12 h-12 rounded-full border-4 border-[#66c0f4] object-cover mb-2" />
                     <span className="text-white font-semibold text-base">{guests[1].name}</span>
                     <span className="bg-[#2ecc71] text-white text-xs font-bold px-3 py-1 rounded-full mt-1">LV.</span>
+                    
+                    {/* Audio Controls for Guest 2 */}
+                    {guests[1].id === currentUser?.id && isOnStage && (
+                      <div className="absolute top-2 right-2">
+                        <button
+                          onClick={toggleMute}
+                          className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors text-xl ${
+                            isMuted 
+                              ? 'bg-red-500 hover:bg-red-600' 
+                              : 'bg-green-500 hover:bg-green-600'
+                          }`}
+                          title={isMuted ? 'Unmute' : 'Mute'}
+                        >
+                          {isMuted ? '🔇' : '🎤'}
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* Audio Level Indicator for Guest 2 */}
+                    {guests[1].id === currentUser?.id && isOnStage && audioLevels[currentUser?.id] && (
+                      <div className="absolute bottom-2 left-2 w-6 h-1 bg-gray-700 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-green-400 transition-all duration-100"
+                          style={{ width: `${Math.min(audioLevels[currentUser?.id] / 2, 100)}%` }}
+                        />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full">
-                    <div className="w-16 h-16 rounded-full bg-[#33415c]/70 flex items-center justify-center mb-2">
-                      <svg width="32" height="32" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#8f98a0" opacity="0.2"/><path d="M8 12h8M12 8v8" stroke="#8f98a0" strokeWidth="2" strokeLinecap="round"/></svg>
+                    <div className="w-12 h-12 rounded-full bg-[#33415c]/70 flex items-center justify-center mb-2">
+                      <svg width="24" height="24" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#8f98a0" opacity="0.2"/><path d="M8 12h8M12 8v8" stroke="#8f98a0" strokeWidth="2" strokeLinecap="round"/></svg>
                     </div>
                     <span className="text-[#8f98a0] text-base font-semibold">Host will add you</span>
                   </div>
                 )}
               </div>
+            </div>
+            
+            {/* Stage Controls */}
+            <div className="flex gap-4 mt-4">
+              {/* Removed join/leave stage buttons - only host can add users via chat */}
             </div>
           </div>
 
@@ -682,50 +699,63 @@ export default function AudioRoom() {
           >
             {/* Messages */}
             <div className="flex flex-col gap-3">
-              {messages.map((msg, idx) => (
-                <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
-                  {msg.userId !== currentUser?.id && (
-                    <img 
-                      src={msg.avatar || "/default-avatar.png"} 
-                      alt={msg.user} 
-                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                    />
-                  )}
-                  <div className={`rounded-lg p-3 max-w-xs relative group ${msg.userId === currentUser?.id ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838] text-[#c7d5e0]'}`}>
+              {messages.map((msg, idx) => {
+                const isUserOnStage = guests.some(g => g && g.id === msg.userId);
+                return (
+                  <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
                     {msg.userId !== currentUser?.id && (
-                      <p className="text-xs font-bold text-[#66c0f4] mb-1">{msg.user}</p>
+                      <img 
+                        src={msg.avatar || "/default-avatar.png"} 
+                        alt={msg.user} 
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      />
                     )}
-                    {msg.userId === currentUser?.id && (
-                      <p className="text-xs font-bold text-white mb-1">You</p>
-                    )}
-                    <p className="text-sm">{msg.text}</p>
-                    {/* Delete button for user's own messages */}
-                    {msg.userId === currentUser?.id && (
-                <button
-                        onClick={() => deleteMessage(msg.id)}
-                        className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete message"
-                >
-                        ×
-                </button>
-              )}
-                    {/* Add to Stage button for host on other users' messages */}
-                    {isHost && msg.userId !== currentUser?.id && (
-                <button
-                        onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
-                        className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                        title="Add to Stage"
-                >
-                        Add to Stage
-                </button>
-              )}
+                    <div className={`rounded-lg p-3 max-w-xs relative group ${msg.userId === currentUser?.id ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838] text-[#c7d5e0]'}`}>
+                      {msg.userId !== currentUser?.id && (
+                        <p className="text-xs font-bold text-[#66c0f4] mb-1">{msg.user}</p>
+                      )}
+                      {msg.userId === currentUser?.id && (
+                        <p className="text-xs font-bold text-white mb-1">You</p>
+                      )}
+                      <p className="text-sm">{msg.text}</p>
+                      {/* Delete button for user's own messages */}
+                      {msg.userId === currentUser?.id && (
+                        <button
+                          onClick={() => deleteMessage(msg.id)}
+                          className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Delete message"
+                        >
+                          ×
+                        </button>
+                      )}
+                      {/* Add to Stage button for host on other users' messages */}
+                      {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
+                        <button
+                          onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
+                          className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Add to Stage"
+                        >
+                          Add to Stage
+                        </button>
+                      )}
+                      {/* Remove from Stage button for host on other users' messages if user is on stage */}
+                      {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
+                        <button
+                          onClick={() => removeUserFromStageFromMessage(msg.userId)}
+                          className="absolute -top-2 -left-2 bg-red-500 hover:bg-red-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Remove from Stage"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
-            </div>
-          ))}
+                );
+              })}
               {messages.length === 0 && (
                 <div className="text-center py-8">
                   <p className="text-sm text-[#8f98a0]">No messages yet. Start the conversation!</p>
-      </div>
+                </div>
               )}
             </div>
           </div>
