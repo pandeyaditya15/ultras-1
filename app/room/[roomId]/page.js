@@ -131,9 +131,7 @@ export default function AudioRoom() {
 
   // Real-time audience sync: listen for changes to room_participants and update fans array
   useEffect(() => {
-    if (!roomId) return;
     let isMounted = true;
-
     async function fetchAudience() {
       // Get all audience user_ids
       const { data: audienceRows } = await supabase
@@ -167,30 +165,30 @@ export default function AudioRoom() {
         }))
       );
     }
-
-    fetchAudience();
-
-    // Real-time subscription
-    const audienceSub = supabase
-      .channel(`room_${roomId}_audience_sync`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'room_participants',
-          filter: `room_id=eq.${roomId}`
-        },
-        async (payload) => {
-          await fetchAudience();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      isMounted = false;
-      audienceSub.unsubscribe();
-    };
+    if (roomId) {
+      fetchAudience();
+      // Real-time subscription
+      const audienceSub = supabase
+        .channel(`room_${roomId}_audience_sync`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'room_participants',
+            filter: `room_id=eq.${roomId}`
+          },
+          async (payload) => {
+            await fetchAudience();
+          }
+        )
+        .subscribe();
+      return () => {
+        isMounted = false;
+        audienceSub.unsubscribe();
+      };
+    }
+    return undefined;
   }, [roomId]);
 
   // Fetch messages from Supabase
@@ -454,9 +452,7 @@ export default function AudioRoom() {
 
   // Real-time stage sync: listen for changes to room_participants and update guests array
   useEffect(() => {
-    if (!roomId) return;
     let isMounted = true;
-
     async function fetchStage() {
       // Get all users on stage
       const { data: stageRows } = await supabase
@@ -491,30 +487,30 @@ export default function AudioRoom() {
       while (guestList.length < 2) guestList.push(null);
       setGuests(guestList);
     }
-
-    fetchStage();
-
-    // Real-time subscription
-    const stageSub = supabase
-      .channel(`room_${roomId}_stage_sync`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'room_participants',
-          filter: `room_id=eq.${roomId}`
-        },
-        async (payload) => {
-          await fetchStage();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      isMounted = false;
-      stageSub.unsubscribe();
-    };
+    if (roomId) {
+      fetchStage();
+      // Real-time subscription
+      const stageSub = supabase
+        .channel(`room_${roomId}_stage_sync`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'room_participants',
+            filter: `room_id=eq.${roomId}`
+          },
+          async (payload) => {
+            await fetchStage();
+          }
+        )
+        .subscribe();
+      return () => {
+        isMounted = false;
+        stageSub.unsubscribe();
+      };
+    }
+    return undefined;
   }, [roomId]);
 
   return (
@@ -552,12 +548,12 @@ export default function AudioRoom() {
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="bg-[#2ecc71] text-white text-xs font-bold px-3 py-1 rounded-full">Host</span>
-              </div>
+          </div>
               
               {/* Audio Controls for Host */}
               {isHost && isOnStage && (
                 <div className="absolute top-2 right-2 flex gap-2">
-                  <button
+            <button
                     onClick={toggleMute}
                     className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors text-2xl ${
                       isMuted 
@@ -565,15 +561,15 @@ export default function AudioRoom() {
                         : 'bg-green-500 hover:bg-green-600'
                     }`}
                     title={isMuted ? 'Unmute' : 'Mute'}
-                  >
+            >
                     {isMuted ? '🔇' : '🎤'}
-                  </button>
+            </button>
                   {isConnecting && (
                     <div className="p-2 bg-yellow-500 rounded-full animate-pulse">
                       🔄
                     </div>
-                  )}
-                </div>
+          )}
+        </div>
               )}
               
               {/* Audio Level Indicator (no digit shown, just bar) */}
@@ -645,7 +641,7 @@ export default function AudioRoom() {
                     {/* Audio Controls for Guest 2 */}
                     {guests[1].id === currentUser?.id && isOnStage && (
                       <div className="absolute top-2 right-2">
-                        <button
+                <button
                           onClick={toggleMute}
                           className={`w-6 h-6 flex items-center justify-center rounded-full transition-colors text-xl ${
                             isMuted 
@@ -653,9 +649,9 @@ export default function AudioRoom() {
                               : 'bg-green-500 hover:bg-green-600'
                           }`}
                           title={isMuted ? 'Unmute' : 'Mute'}
-                        >
+                >
                           {isMuted ? '🔇' : '🎤'}
-                        </button>
+                </button>
                       </div>
                     )}
                     
@@ -696,7 +692,7 @@ export default function AudioRoom() {
                 <p className="text-xs text-[#8f98a0]">✨ Host: {host.name}</p>
               </div>
             </div>
-            <button
+                <button
               onClick={async () => {
                 if (currentUser && roomId) {
                   await supabase
@@ -710,7 +706,7 @@ export default function AudioRoom() {
               className="px-4 py-2 bg-[#4f94bc] text-white rounded-lg hover:bg-[#66c0f4] transition-colors"
             >
               Leave
-            </button>
+                </button>
         </div>
 
           {/* Audience */}
@@ -729,8 +725,8 @@ export default function AudioRoom() {
                 <div key={idx} className="flex flex-col items-center text-center">
                   <img src={fan.avatar} alt={fan.name} className="w-16 h-16 rounded-full"/>
                   <p className="text-sm text-white mt-2">{fan.name}</p>
-              </div>
-              ))}
+            </div>
+          ))}
             </div>
           </div>
         </div>
@@ -739,13 +735,13 @@ export default function AudioRoom() {
         <div className="col-span-1 bg-[#2a475e] rounded-xl flex flex-col border border-gray-700 mb-8">
           <div className="p-4 border-b border-gray-700">
             <h2 className="text-lg font-bold text-white">💬 Chat</h2>
-          </div>
+      </div>
           <div 
             ref={chatContainerRef}
             className="h-[650px] p-4 overflow-y-auto hide-scrollbar"
           >
             {/* Messages */}
-            <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
               {messages.map((msg, idx) => {
                 const isUserOnStage = guests.some(g => g && g.id === msg.userId);
                 return (
@@ -777,17 +773,17 @@ export default function AudioRoom() {
                       )}
                       {/* Add to Stage button for host on other users' messages */}
                       {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
-                        <button
+                <button
                           onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
                           className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
                           title="Add to Stage"
                         >
                           Add to Stage
                         </button>
-                      )}
+              )}
                       {/* Remove from Stage button for host on other users' messages if user is on stage */}
                       {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
-                        <button
+                <button
                           onClick={() => removeUserFromStageFromMessage(msg.userId)}
                           className="absolute -top-2 -left-2 bg-red-500 hover:bg-red-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
                           title="Remove from Stage"
