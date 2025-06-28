@@ -425,6 +425,16 @@ export default function AudioRoom() {
 
   // Determine if current user is the host
   const isHost = currentUser && room && currentUser.id === room.host_id;
+  
+  // Debug host detection
+  useEffect(() => {
+    console.log('=== HOST DETECTION DEBUG ===');
+    console.log('Current user:', currentUser);
+    console.log('Room:', room);
+    console.log('Current user ID:', currentUser?.id);
+    console.log('Room host ID:', room?.host_id);
+    console.log('Is host?', isHost);
+  }, [currentUser, room, isHost]);
 
   // Determine if current user is on stage
   const isOnStage =
@@ -554,6 +564,24 @@ export default function AudioRoom() {
 
   // Add user to stage (host action)
   async function addUserToStageFromMessage(userId, username, avatar) {
+    console.log('=== ADD USER TO STAGE DEBUG ===');
+    console.log('Function called with:', { userId, username, avatar });
+    console.log('Current user:', currentUser);
+    console.log('Is host?', isHost);
+    console.log('Room ID:', roomId);
+    
+    if (!isHost) {
+      console.error('Only hosts can add users to stage');
+      alert('Only hosts can add users to stage');
+      return;
+    }
+    
+    if (!userId || !roomId) {
+      console.error('Missing userId or roomId');
+      alert('Missing user information');
+      return;
+    }
+    
     console.log('Adding user to stage:', userId, username);
     try {
       // Update DB: set role_in_room to 'stage'
@@ -565,13 +593,14 @@ export default function AudioRoom() {
       
       if (error) {
         console.error('Error adding user to stage:', error);
-        alert('Failed to add user to stage');
+        alert('Failed to add user to stage: ' + error.message);
       } else {
         console.log('User added to stage successfully');
+        alert('User added to stage successfully!');
       }
     } catch (err) {
       console.error('Exception adding user to stage:', err);
-      alert('Failed to add user to stage');
+      alert('Failed to add user to stage: ' + err.message);
     }
   }
 
@@ -843,6 +872,18 @@ export default function AudioRoom() {
         <div className="flex flex-col gap-3">
               {messages.map((msg, idx) => {
                 const isUserOnStage = guests.some(g => g && g.id === msg.userId);
+                
+                // Debug button rendering conditions
+                if (isHost && msg.userId !== currentUser?.id) {
+                  console.log('=== BUTTON RENDERING DEBUG ===');
+                  console.log('Message user ID:', msg.userId);
+                  console.log('Current user ID:', currentUser?.id);
+                  console.log('Is host?', isHost);
+                  console.log('Is user on stage?', isUserOnStage);
+                  console.log('Should show Add to Stage?', !isUserOnStage);
+                  console.log('Should show Remove?', isUserOnStage);
+                }
+                
                 return (
                   <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
                     {msg.userId !== currentUser?.id && (
@@ -872,14 +913,23 @@ export default function AudioRoom() {
                       )}
                       {/* Add to Stage button for host on other users' messages */}
                       {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
-                <button
-                          onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
+                        <button
+                          onClick={() => {
+                            console.log('=== ADD TO STAGE BUTTON CLICKED ===');
+                            console.log('Button clicked for user:', msg.userId);
+                            console.log('Message user:', msg.user);
+                            console.log('Is host?', isHost);
+                            console.log('Current user:', currentUser?.id);
+                            console.log('Message user ID:', msg.userId);
+                            console.log('Is user on stage?', isUserOnStage);
+                            addUserToStageFromMessage(msg.userId, msg.user, msg.avatar);
+                          }}
                           className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
                           title="Add to Stage"
                         >
                           Add to Stage
                         </button>
-              )}
+                      )}
                       {/* Remove from Stage button for host on other users' messages if user is on stage */}
                       {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
                 <button
