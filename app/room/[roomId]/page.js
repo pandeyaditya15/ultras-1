@@ -27,6 +27,7 @@ export default function AudioRoom() {
   const [hostMuted, setHostMuted] = useState(false);
   const [guestMuted, setGuestMuted] = useState([true, true]);
   const [audienceUpdating, setAudienceUpdating] = useState(false);
+  const [wasOnStage, setWasOnStage] = useState(false);
   
   const chatContainerRef = useRef(null);
 
@@ -427,8 +428,30 @@ export default function AudioRoom() {
 
   // Determine if current user is on stage
   const isOnStage =
-    (currentUser && host && (currentUser.name) === host.name) ||
-    guests.some((g) => g && g.name === (currentUser?.name));
+    (currentUser && room && currentUser.id === room.host_id) ||
+    guests.some((g) => g && g.id === currentUser?.id);
+
+  // Track stage status changes
+  useEffect(() => {
+    console.log('Stage status check:', {
+      isOnStage,
+      wasOnStage,
+      currentUserId: currentUser?.id,
+      hostId: room?.host_id,
+      guests: guests.map(g => ({ id: g?.id, name: g?.name }))
+    });
+    
+    if (isOnStage && !wasOnStage) {
+      console.log('User added to stage!');
+      setWasOnStage(true);
+    } else if (!isOnStage && wasOnStage) {
+      console.log('User removed from stage!');
+      // User was removed from stage
+      setTimeout(() => {
+        setWasOnStage(false);
+      }, 3000); // Show notification for 3 seconds
+    }
+  }, [isOnStage, wasOnStage, currentUser?.id, room?.host_id, guests]);
 
   // Check if a specific user is on stage
   const isUserOnStage = (userId) => {
@@ -577,6 +600,20 @@ export default function AudioRoom() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#1b2838] to-[#2a475e] p-8 text-[#c7d5e0]">
+      {/* Stage Status Notification */}
+      {isOnStage && !isHost && (
+        <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-pulse">
+          🎤 You're on stage! You can now speak.
+        </div>
+      )}
+      
+      {/* Removed from Stage Notification */}
+      {!isOnStage && wasOnStage && (
+        <div className="fixed top-4 right-4 bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg z-50">
+          🎭 You've been removed from stage.
+        </div>
+      )}
+      
       {/* Hidden audio elements for WebRTC streams */}
       {peers.map(({ id, stream }) => (
         <audio
