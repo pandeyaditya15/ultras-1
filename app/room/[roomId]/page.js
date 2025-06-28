@@ -343,34 +343,59 @@ export default function AudioRoom() {
 
     async function fetchStage() {
       if (!room || !room.host_id) return;
-      const { data: stageRows } = await supabase
+      console.log('Fetching stage participants for room:', roomId);
+      
+      const { data: stageRows, error: stageError } = await supabase
         .from('room_participants')
         .select('user_id')
         .eq('room_id', roomId)
         .eq('role_in_room', 'stage');
+      
+      if (stageError) {
+        console.error('Error fetching stage participants:', stageError);
+        return;
+      }
+      
+      console.log('Stage rows from DB:', stageRows);
+      
       if (!isMounted) return;
       // Exclude host from guests
       const userIds = (stageRows?.map(row => row.user_id) || []).filter(uid => uid !== room.host_id);
+      console.log('User IDs on stage (excluding host):', userIds);
+      
       if (userIds.length === 0) {
+        console.log('No users on stage, setting empty guests');
         setGuests([null, null]);
         return;
       }
-      const { data: profiles } = await supabase
+      
+      const { data: profiles, error: profileError } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
+      
+      if (profileError) {
+        console.error('Error fetching profiles:', profileError);
+        return;
+      }
+      
+      console.log('Profiles for stage users:', profiles);
+      
       const profileMap = {};
       if (profiles) {
         for (const p of profiles) {
           profileMap[p.id] = p;
         }
       }
+      
       const guestList = userIds.slice(0, 2).map(uid => ({
         name: profileMap[uid]?.username || 'Unknown',
         avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
         id: uid,
       }));
+      
       while (guestList.length < 2) guestList.push(null);
+      console.log('Final guest list:', guestList);
       setGuests(guestList);
     }
 
@@ -406,8 +431,8 @@ export default function AudioRoom() {
 
   // Determine if current user is on stage
   const isOnStage =
-    (currentUser && host && (currentUser.name) === host.name) ||
-    guests.some((g) => g && g.name === (currentUser?.name));
+    (currentUser && room && currentUser.id === room.host_id) ||
+    guests.some((g) => g && g.id === currentUser?.id);
 
   // WebRTC audio hook
   const {
@@ -505,22 +530,73 @@ export default function AudioRoom() {
 
   // Add user to stage (host action)
   async function addUserToStageFromMessage(userId, username, avatar) {
-    // Update DB: set role_in_room to 'stage'
-    await supabase
-      .from('room_participants')
-      .update({ role_in_room: 'stage' })
-      .eq('room_id', roomId)
-      .eq('user_id', userId);
+    console.log('Adding user to stage:', { userId, username, avatar, roomId });
+    try {
+      // First check if user exists in room_participants
+      const { data: existingParticipant, error: checkError } = await supabase
+        .from('room_participants')
+        .select('id')
+        .eq('room_id', roomId)
+        .eq('user_id', userId)
+        .single();
+      
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('Error checking participant:', checkError);
+        return;
+      }
+      
+      if (existingParticipant) {
+        // Update existing participant
+        const { error: updateError } = await supabase
+          .from('room_participants')
+          .update({ role_in_room: 'stage' })
+          .eq('room_id', roomId)
+          .eq('user_id', userId);
+        
+        if (updateError) {
+          console.error('Error updating participant to stage:', updateError);
+        } else {
+          console.log('Successfully updated user to stage');
+        }
+      } else {
+        // Insert new participant
+        const { error: insertError } = await supabase
+          .from('room_participants')
+          .insert({
+            room_id: roomId,
+            user_id: userId,
+            role_in_room: 'stage'
+          });
+        
+        if (insertError) {
+          console.error('Error inserting participant to stage:', insertError);
+        } else {
+          console.log('Successfully inserted user to stage');
+        }
+      }
+    } catch (error) {
+      console.error('Exception in addUserToStageFromMessage:', error);
+    }
   }
 
   // Remove user from stage (host action)
   async function removeUserFromStageFromMessage(userId) {
-    // Update DB: set role_in_room to 'audience'
-    await supabase
-      .from('room_participants')
-      .update({ role_in_room: 'audience' })
-      .eq('room_id', roomId)
-      .eq('user_id', userId);
+    console.log('Removing user from stage:', { userId, roomId });
+    try {
+      const { error } = await supabase
+        .from('room_participants')
+        .update({ role_in_room: 'audience' })
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
+      
+      if (error) {
+        console.error('Error removing user from stage:', error);
+      } else {
+        console.log('Successfully removed user from stage');
+      }
+    } catch (error) {
+      console.error('Exception in removeUserFromStageFromMessage:', error);
+    }
   }
 
   return (
