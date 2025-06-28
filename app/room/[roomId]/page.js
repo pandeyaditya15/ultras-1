@@ -913,22 +913,25 @@ export default function AudioRoom() {
                       )}
                       {/* Add to Stage button for host on other users' messages */}
                       {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
-                        <button
-                          onClick={() => {
-                            console.log('=== ADD TO STAGE BUTTON CLICKED ===');
-                            console.log('Button clicked for user:', msg.userId);
-                            console.log('Message user:', msg.user);
-                            console.log('Is host?', isHost);
-                            console.log('Current user:', currentUser?.id);
-                            console.log('Message user ID:', msg.userId);
-                            console.log('Is user on stage?', isUserOnStage);
-                            addUserToStageFromMessage(msg.userId, msg.user, msg.avatar);
-                          }}
-                          className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                          title="Add to Stage"
-                        >
-                          Add to Stage
-                        </button>
+                        <>
+                          {console.log('RENDERING ADD TO STAGE BUTTON for user:', msg.userId)}
+                          <button
+                            onClick={() => {
+                              console.log('=== ADD TO STAGE BUTTON CLICKED ===');
+                              console.log('Button clicked for user:', msg.userId);
+                              console.log('Message user:', msg.user);
+                              console.log('Is host?', isHost);
+                              console.log('Current user:', currentUser?.id);
+                              console.log('Message user ID:', msg.userId);
+                              console.log('Is user on stage?', isUserOnStage);
+                              addUserToStageFromMessage(msg.userId, msg.user, msg.avatar);
+                            }}
+                            className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-3 py-2 text-sm border-2 border-white shadow-lg transition-opacity z-10"
+                            title="Add to Stage"
+                          >
+                            ➕ Add to Stage
+                          </button>
+                        </>
                       )}
                       {/* Remove from Stage button for host on other users' messages if user is on stage */}
                       {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
