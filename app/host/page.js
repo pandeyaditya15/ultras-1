@@ -34,6 +34,7 @@ export default function HostHome() {
     const getSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        console.log('Initial session:', session);
         if (!session) {
           setUser(null);
           setLoading(false);
@@ -41,6 +42,7 @@ export default function HostHome() {
         }
         if (session?.user) {
           setUser(session.user);
+          console.log('User set:', session.user);
           if(session.user.user_metadata?.role === 'host') {
             fetchRooms(session.user.id);
           }
@@ -59,6 +61,7 @@ export default function HostHome() {
 
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         setUser(session?.user ?? null);
+        console.log('Auth state changed:', session);
         if (!session) {
           setUser(null);
           setLoading(false);
@@ -325,6 +328,21 @@ export default function HostHome() {
             {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (!loading && user && user.user_metadata?.role !== 'host') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#1b2838] text-white flex-col gap-4">
+        <div className="text-2xl font-bold">Access Denied</div>
+        <div className="text-lg">You must be a host to access this page.</div>
+        <button
+          className="px-6 py-3 rounded-lg bg-[#66c0f4] text-white font-bold hover:bg-[#4f94bc] transition-colors"
+          onClick={() => router.push('/')}
+        >
+          Go to Home
+        </button>
       </div>
     );
   }
