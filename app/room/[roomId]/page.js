@@ -135,6 +135,7 @@ export default function AudioRoom() {
     let audienceSub = null;
     
     async function fetchAudience() {
+      console.log('Fetching audience participants...');
       // Get all audience user_ids
       const { data: audienceRows } = await supabase
         .from('room_participants')
@@ -142,16 +143,21 @@ export default function AudioRoom() {
         .eq('room_id', roomId)
         .eq('role_in_room', 'audience');
       if (!isMounted) return;
+      
       // Fetch all profiles in one query
       const userIds = audienceRows?.map(row => row.user_id) || [];
+      console.log('Audience user IDs:', userIds);
+      
       if (userIds.length === 0) {
         setFans([]);
         return;
       }
+      
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
+      
       // Map userId to profile
       const profileMap = {};
       if (profiles) {
@@ -159,13 +165,15 @@ export default function AudioRoom() {
           profileMap[p.id] = p;
         }
       }
-      setFans(
-        userIds.map(uid => ({
-          name: profileMap[uid]?.username || 'Unknown',
-          avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
-          id: uid,
-        }))
-      );
+      
+      const audienceList = userIds.map(uid => ({
+        name: profileMap[uid]?.username || 'Unknown',
+        avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
+        id: uid,
+      }));
+      
+      console.log('Updated audience list:', audienceList);
+      setFans(audienceList);
     }
     
     if (roomId) {
@@ -182,18 +190,19 @@ export default function AudioRoom() {
             filter: `room_id=eq.${roomId}`
           },
           async (payload) => {
+            console.log('Audience change detected:', payload);
             await fetchAudience();
           }
         )
         .subscribe();
     }
     
-      return () => {
-        isMounted = false;
+    return () => {
+      isMounted = false;
       if (audienceSub) {
         audienceSub.unsubscribe();
       }
-      };
+    };
   }, [roomId]);
 
   // Fetch messages from Supabase
@@ -261,7 +270,7 @@ export default function AudioRoom() {
         async (payload) => {
           console.log('New message received:', payload);
           try {
-            // Fetch the new message
+            // Fetch the new message with user details
             const { data: newMessage, error } = await supabase
               .from('room_messages')
               .select('*')
@@ -284,6 +293,8 @@ export default function AudioRoom() {
                 userId: newMessage.user_id,
                 avatar: getUserAvatar(newMessage.user_id)
               };
+              
+              console.log('Adding new message to chat:', formattedMessage);
               setMessages(prev => [...prev, formattedMessage]);
             }
           } catch (err) {
@@ -343,34 +354,43 @@ export default function AudioRoom() {
 
     async function fetchStage() {
       if (!room || !room.host_id) return;
+      console.log('Fetching stage participants...');
       const { data: stageRows } = await supabase
         .from('room_participants')
         .select('user_id')
         .eq('room_id', roomId)
         .eq('role_in_room', 'stage');
       if (!isMounted) return;
+      
       // Exclude host from guests
       const userIds = (stageRows?.map(row => row.user_id) || []).filter(uid => uid !== room.host_id);
+      console.log('Stage user IDs (excluding host):', userIds);
+      
       if (userIds.length === 0) {
         setGuests([null, null]);
         return;
       }
+      
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
+      
       const profileMap = {};
       if (profiles) {
         for (const p of profiles) {
           profileMap[p.id] = p;
         }
       }
+      
       const guestList = userIds.slice(0, 2).map(uid => ({
         name: profileMap[uid]?.username || 'Unknown',
         avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
         id: uid,
       }));
+      
       while (guestList.length < 2) guestList.push(null);
+      console.log('Updated guests list:', guestList);
       setGuests(guestList);
     }
 
@@ -387,6 +407,7 @@ export default function AudioRoom() {
             filter: `room_id=eq.${roomId}`
           },
           async (payload) => {
+            console.log('Stage change detected:', payload);
             await fetchStage();
           }
         )
@@ -408,6 +429,11 @@ export default function AudioRoom() {
   const isOnStage =
     (currentUser && host && (currentUser.name) === host.name) ||
     guests.some((g) => g && g.name === (currentUser?.name));
+
+  // Check if a specific user is on stage
+  const isUserOnStage = (userId) => {
+    return guests.some((g) => g && g.id === userId);
+  };
 
   // WebRTC audio hook
   const {
@@ -505,22 +531,48 @@ export default function AudioRoom() {
 
   // Add user to stage (host action)
   async function addUserToStageFromMessage(userId, username, avatar) {
-    // Update DB: set role_in_room to 'stage'
-    await supabase
-      .from('room_participants')
-      .update({ role_in_room: 'stage' })
-      .eq('room_id', roomId)
-      .eq('user_id', userId);
+    console.log('Adding user to stage:', userId, username);
+    try {
+      // Update DB: set role_in_room to 'stage'
+      const { error } = await supabase
+        .from('room_participants')
+        .update({ role_in_room: 'stage' })
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
+      
+      if (error) {
+        console.error('Error adding user to stage:', error);
+        alert('Failed to add user to stage');
+      } else {
+        console.log('User added to stage successfully');
+      }
+    } catch (err) {
+      console.error('Exception adding user to stage:', err);
+      alert('Failed to add user to stage');
+    }
   }
 
   // Remove user from stage (host action)
   async function removeUserFromStageFromMessage(userId) {
-    // Update DB: set role_in_room to 'audience'
-    await supabase
-      .from('room_participants')
-      .update({ role_in_room: 'audience' })
-      .eq('room_id', roomId)
-      .eq('user_id', userId);
+    console.log('Removing user from stage:', userId);
+    try {
+      // Update DB: set role_in_room to 'audience'
+      const { error } = await supabase
+        .from('room_participants')
+        .update({ role_in_room: 'audience' })
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
+      
+      if (error) {
+        console.error('Error removing user from stage:', error);
+        alert('Failed to remove user from stage');
+      } else {
+        console.log('User removed from stage successfully');
+      }
+    } catch (err) {
+      console.error('Exception removing user from stage:', err);
+      alert('Failed to remove user from stage');
+    }
   }
 
   return (

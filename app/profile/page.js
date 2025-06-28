@@ -71,11 +71,26 @@ export default function ProfilePage() {
         const { data: { session } } = await supabase.auth.getSession();
         let redirectPath = '/';
         let role = session?.user?.user_metadata?.role;
+        
+        console.log('=== LOGOUT DEBUG ===');
+        console.log('Session:', session);
+        console.log('User:', session?.user);
+        console.log('User metadata:', session?.user?.user_metadata);
+        console.log('Detected role:', role);
+        console.log('Role type:', typeof role);
+        console.log('Role === "host":', role === 'host');
+        
         if (role === 'host') {
             redirectPath = '/host';
+            console.log('Redirecting HOST to:', redirectPath);
         } else {
             redirectPath = '/';
+            console.log('Redirecting FAN to:', redirectPath);
         }
+        
+        console.log('Final redirect path:', redirectPath);
+        console.log('=== END LOGOUT DEBUG ===');
+        
         await supabase.auth.signOut();
         window.location.href = redirectPath;
     };
@@ -148,7 +163,10 @@ export default function ProfilePage() {
         return <div className="flex min-h-screen items-center justify-center bg-[#1b2838] text-white">Loading...</div>;
     }
     if (!user) {
-        router.push('/');
+        // Use window.location to avoid React state issues
+        if (typeof window !== 'undefined') {
+            window.location.href = '/';
+        }
         return null;
     }
     return (
