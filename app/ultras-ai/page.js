@@ -138,7 +138,7 @@ export default function UltrasAI() {
             <h1 className="text-5xl font-bold text-white">Ultras AI</h1>
           </div>
           <p className="text-xl text-[#c7d5e0] mb-2">AI-Powered Trending Topics for Manchester City</p>
-          <p className="text-[#8f98a0]">Discover what's buzzing in the City universe and start engaging conversations</p>
+          <p className="text-[#8f98a0]">Discover what&apos;s buzzing in the City universe and start engaging conversations</p>
         </div>
 
         {/* Stats Bar */}
