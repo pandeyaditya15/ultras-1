@@ -32,17 +32,34 @@ export default function HostHome() {
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
-        if(session.user.user_metadata?.role === 'host') {
-          fetchRooms(session.user.id);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          router.push('/login');
+          return;
         }
+        if (session?.user) {
+          setUser(session.user);
+          if(session.user.user_metadata?.role === 'host') {
+            fetchRooms(session.user.id);
+          }
+        }
+      } catch (err) {
+        // Handle AuthApiError: Invalid Refresh Token
+        if (err?.message?.includes('Invalid Refresh Token')) {
+          await supabase.auth.signOut();
+          router.push('/login');
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
 
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         setUser(session?.user ?? null);
+        if (!session) {
+          router.push('/login');
+          return;
+        }
         if (session?.user?.user_metadata?.role === 'host') {
           fetchRooms(session.user.id);
         } else {
@@ -166,6 +183,23 @@ export default function HostHome() {
         setRooms(rooms.filter((room) => room.id !== roomId));
       }
       setLoading(false);
+    }
+  };
+
+  const copyRoomLink = async (roomId) => {
+    const roomLink = `${window.location.origin}/room/${roomId}`;
+    try {
+      await navigator.clipboard.writeText(roomLink);
+      alert('Room link copied to clipboard!');
+    } catch (err) {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = roomLink;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Room link copied to clipboard!');
     }
   };
 
@@ -308,6 +342,18 @@ export default function HostHome() {
                 <span>{item.label}</span>
               </div>
             ))}
+            {/* Ultras AI Button */}
+            <div
+              className={`flex items-center gap-4 px-4 py-3 rounded-lg text-lg font-normal cursor-pointer hover:bg-[#1b2838] transition-colors select-none ${activePage === 'ultras-ai' ? 'bg-[#1b2838] font-semibold text-white' : 'text-[#c7d5e0]'}`}
+              onClick={() => {
+                setActivePage('ultras-ai');
+                router.push('/ultras-ai');
+              }}
+            >
+              {/* Lightning bolt icon */}
+              <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              <span>Ultras AI</span>
+            </div>
           </nav>
         </div>
         {/* User Profile */}
@@ -415,6 +461,18 @@ export default function HostHome() {
                           onClick={() => router.push(`/room/${room.id}`)}
                         >
                         Join Stream
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyRoomLink(room.id);
+                        }}
+                        className="p-2 rounded-full text-[#66c0f4] hover:bg-[#1b2838] transition-colors"
+                        title="Share room link"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+                        </svg>
                       </button>
                       <button
                         onClick={(e) => {

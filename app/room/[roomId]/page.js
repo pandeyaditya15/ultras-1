@@ -132,6 +132,8 @@ export default function AudioRoom() {
   // Real-time audience sync: listen for changes to room_participants and update fans array
   useEffect(() => {
     let isMounted = true;
+    let audienceSub = null;
+    
     async function fetchAudience() {
       // Get all audience user_ids
       const { data: audienceRows } = await supabase
@@ -165,10 +167,11 @@ export default function AudioRoom() {
         }))
       );
     }
+    
     if (roomId) {
       fetchAudience();
       // Real-time subscription
-      const audienceSub = supabase
+      audienceSub = supabase
         .channel(`room_${roomId}_audience_sync`)
         .on(
           'postgres_changes',
@@ -183,12 +186,14 @@ export default function AudioRoom() {
           }
         )
         .subscribe();
-      return () => {
-        isMounted = false;
-        audienceSub.unsubscribe();
-      };
     }
-    return undefined;
+    
+    return () => {
+      isMounted = false;
+      if (audienceSub) {
+        audienceSub.unsubscribe();
+      }
+    };
   }, [roomId]);
 
   // Fetch messages from Supabase
@@ -331,6 +336,71 @@ export default function AudioRoom() {
     };
   }, [currentUser, roomId]);
 
+  // Real-time stage sync: listen for changes to room_participants and update guests array
+  useEffect(() => {
+    let isMounted = true;
+    let stageSub = null;
+
+    async function fetchStage() {
+      if (!room || !room.host_id) return;
+      const { data: stageRows } = await supabase
+        .from('room_participants')
+        .select('user_id')
+        .eq('room_id', roomId)
+        .eq('role_in_room', 'stage');
+      if (!isMounted) return;
+      // Exclude host from guests
+      const userIds = (stageRows?.map(row => row.user_id) || []).filter(uid => uid !== room.host_id);
+      if (userIds.length === 0) {
+        setGuests([null, null]);
+        return;
+      }
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .in('id', userIds);
+      const profileMap = {};
+      if (profiles) {
+        for (const p of profiles) {
+          profileMap[p.id] = p;
+        }
+      }
+      const guestList = userIds.slice(0, 2).map(uid => ({
+        name: profileMap[uid]?.username || 'Unknown',
+        avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
+        id: uid,
+      }));
+      while (guestList.length < 2) guestList.push(null);
+      setGuests(guestList);
+    }
+
+    if (roomId && room && room.host_id) {
+      fetchStage();
+      stageSub = supabase
+        .channel(`room_${roomId}_stage_sync`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'room_participants',
+            filter: `room_id=eq.${roomId}`
+          },
+          async (payload) => {
+            await fetchStage();
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      isMounted = false;
+      if (stageSub) {
+        stageSub.unsubscribe();
+      }
+    };
+  }, [roomId, room?.host_id]);
+
   // Determine if current user is the host
   const isHost = currentUser && room && currentUser.id === room.host_id;
 
@@ -423,6 +493,9 @@ export default function AudioRoom() {
       if (error) {
         console.error('Error deleting message:', error);
         alert('Failed to delete message');
+      } else {
+        // Immediately update local state
+        setMessages(prev => prev.filter(msg => msg.id !== messageId));
       }
     } catch (err) {
       console.error('Exception deleting message:', err);
@@ -449,69 +522,6 @@ export default function AudioRoom() {
       .eq('room_id', roomId)
       .eq('user_id', userId);
   }
-
-  // Real-time stage sync: listen for changes to room_participants and update guests array
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchStage() {
-      // Get all users on stage
-      const { data: stageRows } = await supabase
-        .from('room_participants')
-        .select('user_id')
-        .eq('room_id', roomId)
-        .eq('role_in_room', 'stage');
-      if (!isMounted) return;
-      // Fetch all profiles in one query
-      const userIds = stageRows?.map(row => row.user_id) || [];
-      if (userIds.length === 0) {
-        setGuests([null, null]);
-        return;
-      }
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .in('id', userIds);
-      // Map userId to profile
-      const profileMap = {};
-      if (profiles) {
-        for (const p of profiles) {
-          profileMap[p.id] = p;
-        }
-      }
-      // Fill up to 2 guest slots
-      const guestList = userIds.slice(0, 2).map(uid => ({
-        name: profileMap[uid]?.username || 'Unknown',
-        avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
-        id: uid,
-      }));
-      while (guestList.length < 2) guestList.push(null);
-      setGuests(guestList);
-    }
-    if (roomId) {
-      fetchStage();
-      // Real-time subscription
-      const stageSub = supabase
-        .channel(`room_${roomId}_stage_sync`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'room_participants',
-            filter: `room_id=eq.${roomId}`
-          },
-          async (payload) => {
-            await fetchStage();
-          }
-        )
-        .subscribe();
-      return () => {
-        isMounted = false;
-        stageSub.unsubscribe();
-      };
-    }
-    return undefined;
-  }, [roomId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#1b2838] to-[#2a475e] p-8 text-[#c7d5e0]">
