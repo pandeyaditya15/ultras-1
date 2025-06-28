@@ -111,19 +111,40 @@ export default function AudioRoom() {
   useEffect(() => {
     async function joinAudience() {
       if (!currentUser?.id || !roomId) return;
-      // Check if already present
-      const { data: existing, error: fetchError } = await supabase
-        .from('room_participants')
-        .select('id')
-        .eq('room_id', roomId)
-        .eq('user_id', currentUser.id)
-        .single();
-      if (!existing) {
-        await supabase.from('room_participants').insert({
-          room_id: roomId,
-          user_id: currentUser.id,
-          role_in_room: 'audience',
-        });
+      console.log('Joining audience for user:', currentUser.id, 'in room:', roomId);
+      
+      try {
+        // Check if already present
+        const { data: existing, error: fetchError } = await supabase
+          .from('room_participants')
+          .select('id')
+          .eq('room_id', roomId)
+          .eq('user_id', currentUser.id)
+          .maybeSingle(); // Use maybeSingle instead of single to avoid 406 error
+        
+        if (fetchError) {
+          console.error('Error checking existing participant:', fetchError);
+          return;
+        }
+        
+        if (!existing) {
+          console.log('User not in room, adding to audience');
+          const { error: insertError } = await supabase.from('room_participants').insert({
+            room_id: roomId,
+            user_id: currentUser.id,
+            role_in_room: 'audience',
+          });
+          
+          if (insertError) {
+            console.error('Error adding user to audience:', insertError);
+          } else {
+            console.log('Successfully added user to audience');
+          }
+        } else {
+          console.log('User already in room');
+        }
+      } catch (error) {
+        console.error('Exception in joinAudience:', error);
       }
     }
     joinAudience();
@@ -357,11 +378,14 @@ export default function AudioRoom() {
       }
       
       console.log('Stage rows from DB:', stageRows);
+      console.log('Room host_id:', room.host_id);
+      console.log('Stage row user_ids:', stageRows?.map(row => row.user_id));
       
       if (!isMounted) return;
       // Exclude host from guests
       const userIds = (stageRows?.map(row => row.user_id) || []).filter(uid => uid !== room.host_id);
       console.log('User IDs on stage (excluding host):', userIds);
+      console.log('Filtered out host ID:', room.host_id);
       
       if (userIds.length === 0) {
         console.log('No users on stage, setting empty guests');
