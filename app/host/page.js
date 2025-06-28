@@ -333,6 +333,10 @@ export default function HostHome() {
   }
 
   if (!loading && user && user.user_metadata?.role !== 'host') {
+    const becomeHost = async () => {
+      await supabase.auth.updateUser({ data: { role: 'host' } });
+      window.location.reload();
+    };
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#1b2838] text-white flex-col gap-4">
         <div className="text-2xl font-bold">Access Denied</div>
@@ -342,6 +346,12 @@ export default function HostHome() {
           onClick={() => router.push('/')}
         >
           Go to Home
+        </button>
+        <button
+          className="px-6 py-3 rounded-lg bg-[#4f94bc] text-white font-bold hover:bg-[#66c0f4] transition-colors"
+          onClick={becomeHost}
+        >
+          Become a Host (for testing)
         </button>
       </div>
     );
