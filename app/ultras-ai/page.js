@@ -10,24 +10,24 @@ export default function UltrasAI() {
   const trendingTopics = [
     {
       id: 1,
-      title: "Haaland's Golden Boot Race",
-      description: "Erling Haaland's pursuit of Premier League scoring records and his impact on City's title chase",
+      title: "Haaland&apos;s Golden Boot Race",
+      description: "Erling Haaland&apos;s pursuit of Premier League scoring records and his impact on City&apos;s title chase",
       engagement: "🔥 2.4M mentions",
       sentiment: "positive",
       category: "Player Performance"
     },
     {
       id: 2,
-      title: "De Bruyne's Return from Injury",
-      description: "Kevin De Bruyne's comeback and his crucial role in City's midfield creativity",
+      title: "De Bruyne&apos;s Return from Injury",
+      description: "Kevin De Bruyne&apos;s comeback and his crucial role in City&apos;s midfield creativity",
       engagement: "🔥 1.8M mentions",
       sentiment: "positive",
       category: "Injury Updates"
     },
     {
       id: 3,
-      title: "Pep's Tactical Evolution",
-      description: "Guardiola's latest tactical innovations and formation changes this season",
+      title: "Pep&apos;s Tactical Evolution",
+      description: "Guardiola&apos;s latest tactical innovations and formation changes this season",
       engagement: "🔥 1.5M mentions",
       sentiment: "neutral",
       category: "Tactics"
@@ -35,15 +35,15 @@ export default function UltrasAI() {
     {
       id: 4,
       title: "Champions League Quarter-Final Draw",
-      description: "City's potential opponents and path to Champions League glory",
+      description: "City&apos;s potential opponents and path to Champions League glory",
       engagement: "🔥 1.2M mentions",
       sentiment: "excited",
       category: "Competitions"
     },
     {
       id: 5,
-      title: "Foden's Breakthrough Season",
-      description: "Phil Foden's emergence as a key player and his England prospects",
+      title: "Foden&apos;s Breakthrough Season",
+      description: "Phil Foden&apos;s emergence as a key player and his England prospects",
       engagement: "🔥 980K mentions",
       sentiment: "positive",
       category: "Player Development"
@@ -59,7 +59,7 @@ export default function UltrasAI() {
     {
       id: 7,
       title: "Premier League Title Race",
-      description: "City's position in the title race and remaining fixtures analysis",
+      description: "City&apos;s position in the title race and remaining fixtures analysis",
       engagement: "🔥 750K mentions",
       sentiment: "nervous",
       category: "League"
@@ -75,7 +75,7 @@ export default function UltrasAI() {
     {
       id: 9,
       title: "Academy Prospects",
-      description: "Rising stars from City's youth academy and their first-team chances",
+      description: "Rising stars from City&apos;s youth academy and their first-team chances",
       engagement: "🔥 540K mentions",
       sentiment: "excited",
       category: "Youth"
