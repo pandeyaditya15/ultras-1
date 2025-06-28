@@ -71,12 +71,12 @@ export default function ProfilePage() {
         const { data: { session } } = await supabase.auth.getSession();
         let redirectPath = '/';
         let role = session?.user?.user_metadata?.role;
-        console.log('Logging out, user role:', role);
         if (role === 'host') {
             redirectPath = '/host';
+        } else {
+            redirectPath = '/';
         }
         await supabase.auth.signOut();
-        // Use window.location to force a hard redirect (avoids Next.js router cache issues)
         window.location.href = redirectPath;
     };
 
