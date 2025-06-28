@@ -27,6 +27,7 @@ export default function AudioRoom() {
   const [hostMuted, setHostMuted] = useState(false);
   const [guestMuted, setGuestMuted] = useState([true, true]);
   const [audienceUpdating, setAudienceUpdating] = useState(false);
+  const [showScript, setShowScript] = useState(false);
   
   const chatContainerRef = useRef(null);
 
@@ -843,94 +844,144 @@ export default function AudioRoom() {
 
         {/* Right Column (Chat) */}
         <div className="col-span-1 bg-[#2a475e] rounded-xl flex flex-col border border-gray-700 mb-8">
-          <div className="p-4 border-b border-gray-700">
+          <div className="p-4 border-b border-gray-700 flex items-center justify-between">
             <h2 className="text-lg font-bold text-white">💬 Chat</h2>
-      </div>
-          <div 
-            ref={chatContainerRef}
-            className="h-[650px] p-4 overflow-y-auto hide-scrollbar"
-          >
-            {/* Messages */}
-        <div className="flex flex-col gap-3">
-              {messages.map((msg, idx) => {
-                const isUserOnStage = guests.some(g => g && g.id === msg.userId);
-                return (
-                  <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
-                    {msg.userId !== currentUser?.id && (
-                      <img 
-                        src={msg.avatar || "/default-avatar.png"} 
-                        alt={msg.user} 
-                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                      />
-                    )}
-                    <div className={`rounded-lg p-3 max-w-xs relative group ${msg.userId === currentUser?.id ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838] text-[#c7d5e0]'}`}>
-                      {msg.userId !== currentUser?.id && (
-                        <p className="text-xs font-bold text-[#66c0f4] mb-1">{msg.user}</p>
-                      )}
-                      {msg.userId === currentUser?.id && (
-                        <p className="text-xs font-bold text-white mb-1">You</p>
-                      )}
-                      <p className="text-sm">{msg.text}</p>
-                      {/* Delete button for user's own messages */}
-                      {msg.userId === currentUser?.id && (
-                        <button
-                          onClick={() => deleteMessage(msg.id)}
-                          className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Delete message"
-                        >
-                          ×
-                        </button>
-                      )}
-                      {/* Add to Stage button for host on other users' messages */}
-                      {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
-                <button
-                          onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
-                          className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                          title="Add to Stage"
-                        >
-                          Add to Stage
-                        </button>
-              )}
-                      {/* Remove from Stage button for host on other users' messages if user is on stage */}
-                      {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
-                <button
-                          onClick={() => removeUserFromStageFromMessage(msg.userId)}
-                          className="absolute -top-2 -left-2 bg-red-500 hover:bg-red-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                          title="Remove from Stage"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {messages.length === 0 && (
-                <div className="text-center py-8">
-                  <p className="text-sm text-[#8f98a0]">No messages yet. Start the conversation!</p>
+            <button
+              onClick={() => setShowScript((prev) => !prev)}
+              className="px-3 py-1 bg-[#66c0f4] hover:bg-[#4f94bc] text-white rounded-lg text-sm font-semibold transition-colors"
+            >
+              {showScript ? 'Show Chat' : 'Show Script'}
+            </button>
+          </div>
+          {showScript ? (
+            // Script Box (same size as chat)
+            <div className="h-[650px] p-4 overflow-y-auto hide-scrollbar flex flex-col justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-white mb-4">🎤 Host Script</h3>
+                <div className="bg-[#1b2838] rounded-lg p-4 text-[#c7d5e0] text-base whitespace-pre-line" style={{ minHeight: '500px' }}>
+                  {`Welcome to today's Manchester City room!
+
+👋 Intro:
+- Welcome everyone, introduce yourself as the host.
+- Quick shoutout to new joiners and regulars.
+- Remind everyone to be respectful and have fun.
+
+🔥 Agenda:
+1. Haaland's Golden Boot chase – Is he the best striker in the world right now?
+2. De Bruyne's return – How does his presence change our midfield dynamics?
+3. Pep's tactics – Thoughts on the new formation and recent performances?
+4. Transfer rumors – Who should City sign or let go this window?
+5. Foden's breakthrough – Is he the future of City and England?
+6. Open floor – Any other hot takes or questions from the audience?
+
+💡 Engagement Tips:
+- Encourage fans to use the chat or raise their hand to join the stage.
+- Ask for quick polls: "Thumbs up if you think City will win the league!"
+- Invite fans to share their favorite City moment this season.
+
+🎤 Q&A:
+- Take questions from the chat or bring fans on stage for live discussion.
+- Keep answers concise to involve more people.
+
+🔔 Closing:
+- Thank everyone for joining and sharing their thoughts.
+- Remind about the next room or upcoming matches.
+- Encourage everyone to follow and invite friends next time.
+
+Let's keep it positive, insightful, and full of City spirit! 💙`}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
-          <div className="p-4 border-t border-gray-700">
-            <form onSubmit={handleSendMessage} className="flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Type a message..."
-                disabled={sendingMessage}
-                className="flex-grow bg-[#1b2838] border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#66c0f4] disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={sendingMessage || !chatInput.trim()}
-                className="px-6 py-2 bg-[#4f94bc] text-white rounded-lg hover:bg-[#66c0f4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          ) : (
+            // Chat Box
+            <>
+              <div 
+                ref={chatContainerRef}
+                className="h-[650px] p-4 overflow-y-auto hide-scrollbar"
               >
-                {sendingMessage ? 'Sending...' : 'Send'}
-              </button>
-            </form>
-          </div>
+                {/* Messages */}
+                <div className="flex flex-col gap-3">
+                  {messages.map((msg, idx) => {
+                    const isUserOnStage = guests.some(g => g && g.id === msg.userId);
+                    return (
+                      <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
+                        {msg.userId !== currentUser?.id && (
+                          <img 
+                            src={msg.avatar || "/default-avatar.png"} 
+                            alt={msg.user} 
+                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                          />
+                        )}
+                        <div className={`rounded-lg p-3 max-w-xs relative group ${msg.userId === currentUser?.id ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838] text-[#c7d5e0]'}`}>
+                          {msg.userId !== currentUser?.id && (
+                            <p className="text-xs font-bold text-[#66c0f4] mb-1">{msg.user}</p>
+                          )}
+                          {msg.userId === currentUser?.id && (
+                            <p className="text-xs font-bold text-white mb-1">You</p>
+                          )}
+                          <p className="text-sm">{msg.text}</p>
+                          {/* Delete button for user's own messages */}
+                          {msg.userId === currentUser?.id && (
+                            <button
+                              onClick={() => deleteMessage(msg.id)}
+                              className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Delete message"
+                            >
+                              ×
+                            </button>
+                          )}
+                          {/* Add to Stage button for host on other users' messages */}
+                          {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
+                            <button
+                              onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
+                              className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                              title="Add to Stage"
+                            >
+                              Add to Stage
+                            </button>
+                          )}
+                          {/* Remove from Stage button for host on other users' messages if user is on stage */}
+                          {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
+                            <button
+                              onClick={() => removeUserFromStageFromMessage(msg.userId)}
+                              className="absolute -top-2 -left-2 bg-red-500 hover:bg-red-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                              title="Remove from Stage"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {messages.length === 0 && (
+                    <div className="text-center py-8">
+                      <p className="text-sm text-[#8f98a0]">No messages yet. Start the conversation!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="p-4 border-t border-gray-700">
+                <form onSubmit={handleSendMessage} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Type a message..."
+                    disabled={sendingMessage}
+                    className="flex-grow bg-[#1b2838] border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#66c0f4] disabled:opacity-50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={sendingMessage || !chatInput.trim()}
+                    className="px-6 py-2 bg-[#4f94bc] text-white rounded-lg hover:bg-[#66c0f4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {sendingMessage ? 'Sending...' : 'Send'}
+                  </button>
+                </form>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

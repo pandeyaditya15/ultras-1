@@ -30,6 +30,18 @@ export default function HostHome() {
   const [isSignUp, setIsSignUp] = useState(false);
   const router = useRouter();
 
+  // Check for topic parameter from Ultras AI
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const topic = urlParams.get('topic');
+    if (topic) {
+      setNewRoom(prev => ({ ...prev, title: topic }));
+      setActivePage("create");
+      // Clear the URL parameter
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   useEffect(() => {
     const getSession = async () => {
       try {
