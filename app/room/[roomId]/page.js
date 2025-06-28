@@ -73,7 +73,7 @@ export default function AudioRoom() {
       }
     }
     fetchUser();
-  }, []);
+  }, [getUserAvatar]);
 
   // Fetch room data from Supabase and then fetch host's user profile for avatar
   useEffect(() => {
@@ -204,7 +204,7 @@ export default function AudioRoom() {
         audienceSub.unsubscribe();
       }
     };
-  }, [roomId]);
+  }, [roomId, getUserAvatar]);
 
   // Fetch messages from Supabase
   useEffect(() => {
@@ -321,7 +321,7 @@ export default function AudioRoom() {
     return () => {
       messageSubscription.unsubscribe();
     };
-  }, [roomId]);
+  }, [roomId, getUserAvatar]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -421,7 +421,7 @@ export default function AudioRoom() {
         stageSub.unsubscribe();
       }
     };
-  }, [roomId, room?.host_id]);
+  }, [roomId, room?.host_id, getUserAvatar, room]);
 
   // Determine if current user is the host
   const isHost = currentUser && room && currentUser.id === room.host_id;
@@ -603,14 +603,14 @@ export default function AudioRoom() {
       {/* Stage Status Notification */}
       {isOnStage && !isHost && (
         <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-pulse">
-          🎤 You're on stage! You can now speak.
+          🎤 You&apos;re on stage! You can now speak.
         </div>
       )}
       
       {/* Removed from Stage Notification */}
       {!isOnStage && wasOnStage && (
         <div className="fixed top-4 right-4 bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          🎭 You've been removed from stage.
+          🎭 You&apos;ve been removed from stage.
         </div>
       )}
       
