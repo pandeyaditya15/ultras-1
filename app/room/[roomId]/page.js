@@ -188,12 +188,12 @@ export default function AudioRoom() {
         .subscribe();
     }
     
-    return () => {
-      isMounted = false;
+      return () => {
+        isMounted = false;
       if (audienceSub) {
         audienceSub.unsubscribe();
       }
-    };
+      };
   }, [roomId]);
 
   // Fetch messages from Supabase

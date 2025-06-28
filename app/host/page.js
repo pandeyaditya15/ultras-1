@@ -35,7 +35,8 @@ export default function HostHome() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          router.push('/login');
+          setUser(null);
+          setLoading(false);
           return;
         }
         if (session?.user) {
@@ -48,7 +49,9 @@ export default function HostHome() {
         // Handle AuthApiError: Invalid Refresh Token
         if (err?.message?.includes('Invalid Refresh Token')) {
           await supabase.auth.signOut();
-          router.push('/login');
+          setUser(null);
+          setLoading(false);
+          return;
         }
       } finally {
         setLoading(false);
@@ -57,7 +60,8 @@ export default function HostHome() {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         setUser(session?.user ?? null);
         if (!session) {
-          router.push('/login');
+          setUser(null);
+          setLoading(false);
           return;
         }
         if (session?.user?.user_metadata?.role === 'host') {
