@@ -27,7 +27,6 @@ export default function AudioRoom() {
   const [hostMuted, setHostMuted] = useState(false);
   const [guestMuted, setGuestMuted] = useState([true, true]);
   const [audienceUpdating, setAudienceUpdating] = useState(false);
-  const [wasOnStage, setWasOnStage] = useState(false);
   
   const chatContainerRef = useRef(null);
 
@@ -73,7 +72,7 @@ export default function AudioRoom() {
       }
     }
     fetchUser();
-  }, [getUserAvatar]);
+  }, []);
 
   // Fetch room data from Supabase and then fetch host's user profile for avatar
   useEffect(() => {
@@ -136,7 +135,6 @@ export default function AudioRoom() {
     let audienceSub = null;
     
     async function fetchAudience() {
-      console.log('Fetching audience participants...');
       // Get all audience user_ids
       const { data: audienceRows } = await supabase
         .from('room_participants')
@@ -144,21 +142,16 @@ export default function AudioRoom() {
         .eq('room_id', roomId)
         .eq('role_in_room', 'audience');
       if (!isMounted) return;
-      
       // Fetch all profiles in one query
       const userIds = audienceRows?.map(row => row.user_id) || [];
-      console.log('Audience user IDs:', userIds);
-      
       if (userIds.length === 0) {
         setFans([]);
         return;
       }
-      
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
-      
       // Map userId to profile
       const profileMap = {};
       if (profiles) {
@@ -166,15 +159,13 @@ export default function AudioRoom() {
           profileMap[p.id] = p;
         }
       }
-      
-      const audienceList = userIds.map(uid => ({
-        name: profileMap[uid]?.username || 'Unknown',
-        avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
-        id: uid,
-      }));
-      
-      console.log('Updated audience list:', audienceList);
-      setFans(audienceList);
+      setFans(
+        userIds.map(uid => ({
+          name: profileMap[uid]?.username || 'Unknown',
+          avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
+          id: uid,
+        }))
+      );
     }
     
     if (roomId) {
@@ -191,20 +182,19 @@ export default function AudioRoom() {
             filter: `room_id=eq.${roomId}`
           },
           async (payload) => {
-            console.log('Audience change detected:', payload);
             await fetchAudience();
           }
         )
         .subscribe();
     }
     
-    return () => {
-      isMounted = false;
+      return () => {
+        isMounted = false;
       if (audienceSub) {
         audienceSub.unsubscribe();
       }
-    };
-  }, [roomId, getUserAvatar]);
+      };
+  }, [roomId]);
 
   // Fetch messages from Supabase
   useEffect(() => {
@@ -271,7 +261,7 @@ export default function AudioRoom() {
         async (payload) => {
           console.log('New message received:', payload);
           try {
-            // Fetch the new message with user details
+            // Fetch the new message
             const { data: newMessage, error } = await supabase
               .from('room_messages')
               .select('*')
@@ -294,8 +284,6 @@ export default function AudioRoom() {
                 userId: newMessage.user_id,
                 avatar: getUserAvatar(newMessage.user_id)
               };
-              
-              console.log('Adding new message to chat:', formattedMessage);
               setMessages(prev => [...prev, formattedMessage]);
             }
           } catch (err) {
@@ -321,7 +309,7 @@ export default function AudioRoom() {
     return () => {
       messageSubscription.unsubscribe();
     };
-  }, [roomId, getUserAvatar]);
+  }, [roomId]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -355,43 +343,34 @@ export default function AudioRoom() {
 
     async function fetchStage() {
       if (!room || !room.host_id) return;
-      console.log('Fetching stage participants...');
       const { data: stageRows } = await supabase
         .from('room_participants')
         .select('user_id')
         .eq('room_id', roomId)
         .eq('role_in_room', 'stage');
       if (!isMounted) return;
-      
       // Exclude host from guests
       const userIds = (stageRows?.map(row => row.user_id) || []).filter(uid => uid !== room.host_id);
-      console.log('Stage user IDs (excluding host):', userIds);
-      
       if (userIds.length === 0) {
         setGuests([null, null]);
         return;
       }
-      
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', userIds);
-      
       const profileMap = {};
       if (profiles) {
         for (const p of profiles) {
           profileMap[p.id] = p;
         }
       }
-      
       const guestList = userIds.slice(0, 2).map(uid => ({
         name: profileMap[uid]?.username || 'Unknown',
         avatar: profileMap[uid]?.avatar_url || getUserAvatar(uid),
         id: uid,
       }));
-      
       while (guestList.length < 2) guestList.push(null);
-      console.log('Updated guests list:', guestList);
       setGuests(guestList);
     }
 
@@ -408,7 +387,6 @@ export default function AudioRoom() {
             filter: `room_id=eq.${roomId}`
           },
           async (payload) => {
-            console.log('Stage change detected:', payload);
             await fetchStage();
           }
         )
@@ -421,52 +399,15 @@ export default function AudioRoom() {
         stageSub.unsubscribe();
       }
     };
-  }, [roomId, room?.host_id, getUserAvatar, room]);
+  }, [roomId, room?.host_id]);
 
   // Determine if current user is the host
   const isHost = currentUser && room && currentUser.id === room.host_id;
-  
-  // Debug host detection
-  useEffect(() => {
-    console.log('=== HOST DETECTION DEBUG ===');
-    console.log('Current user:', currentUser);
-    console.log('Room:', room);
-    console.log('Current user ID:', currentUser?.id);
-    console.log('Room host ID:', room?.host_id);
-    console.log('Is host?', isHost);
-  }, [currentUser, room, isHost]);
 
   // Determine if current user is on stage
   const isOnStage =
-    (currentUser && room && currentUser.id === room.host_id) ||
-    guests.some((g) => g && g.id === currentUser?.id);
-
-  // Track stage status changes
-  useEffect(() => {
-    console.log('Stage status check:', {
-      isOnStage,
-      wasOnStage,
-      currentUserId: currentUser?.id,
-      hostId: room?.host_id,
-      guests: guests.map(g => ({ id: g?.id, name: g?.name }))
-    });
-    
-    if (isOnStage && !wasOnStage) {
-      console.log('User added to stage!');
-      setWasOnStage(true);
-    } else if (!isOnStage && wasOnStage) {
-      console.log('User removed from stage!');
-      // User was removed from stage
-      setTimeout(() => {
-        setWasOnStage(false);
-      }, 3000); // Show notification for 3 seconds
-    }
-  }, [isOnStage, wasOnStage, currentUser?.id, room?.host_id, guests]);
-
-  // Check if a specific user is on stage
-  const isUserOnStage = (userId) => {
-    return guests.some((g) => g && g.id === userId);
-  };
+    (currentUser && host && (currentUser.name) === host.name) ||
+    guests.some((g) => g && g.name === (currentUser?.name));
 
   // WebRTC audio hook
   const {
@@ -564,85 +505,26 @@ export default function AudioRoom() {
 
   // Add user to stage (host action)
   async function addUserToStageFromMessage(userId, username, avatar) {
-    console.log('=== ADD USER TO STAGE DEBUG ===');
-    console.log('Function called with:', { userId, username, avatar });
-    console.log('Current user:', currentUser);
-    console.log('Is host?', isHost);
-    console.log('Room ID:', roomId);
-    
-    if (!isHost) {
-      console.error('Only hosts can add users to stage');
-      alert('Only hosts can add users to stage');
-      return;
-    }
-    
-    if (!userId || !roomId) {
-      console.error('Missing userId or roomId');
-      alert('Missing user information');
-      return;
-    }
-    
-    console.log('Adding user to stage:', userId, username);
-    try {
-      // Update DB: set role_in_room to 'stage'
-      const { error } = await supabase
-        .from('room_participants')
-        .update({ role_in_room: 'stage' })
-        .eq('room_id', roomId)
-        .eq('user_id', userId);
-      
-      if (error) {
-        console.error('Error adding user to stage:', error);
-        alert('Failed to add user to stage: ' + error.message);
-      } else {
-        console.log('User added to stage successfully');
-        alert('User added to stage successfully!');
-      }
-    } catch (err) {
-      console.error('Exception adding user to stage:', err);
-      alert('Failed to add user to stage: ' + err.message);
-    }
+    // Update DB: set role_in_room to 'stage'
+    await supabase
+      .from('room_participants')
+      .update({ role_in_room: 'stage' })
+      .eq('room_id', roomId)
+      .eq('user_id', userId);
   }
 
   // Remove user from stage (host action)
   async function removeUserFromStageFromMessage(userId) {
-    console.log('Removing user from stage:', userId);
-    try {
-      // Update DB: set role_in_room to 'audience'
-      const { error } = await supabase
-        .from('room_participants')
-        .update({ role_in_room: 'audience' })
-        .eq('room_id', roomId)
-        .eq('user_id', userId);
-      
-      if (error) {
-        console.error('Error removing user from stage:', error);
-        alert('Failed to remove user from stage');
-      } else {
-        console.log('User removed from stage successfully');
-      }
-    } catch (err) {
-      console.error('Exception removing user from stage:', err);
-      alert('Failed to remove user from stage');
-    }
+    // Update DB: set role_in_room to 'audience'
+    await supabase
+      .from('room_participants')
+      .update({ role_in_room: 'audience' })
+      .eq('room_id', roomId)
+      .eq('user_id', userId);
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#1b2838] to-[#2a475e] p-8 text-[#c7d5e0]">
-      {/* Stage Status Notification */}
-      {isOnStage && !isHost && (
-        <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-pulse">
-          🎤 You&apos;re on stage! You can now speak.
-        </div>
-      )}
-      
-      {/* Removed from Stage Notification */}
-      {!isOnStage && wasOnStage && (
-        <div className="fixed top-4 right-4 bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          🎭 You&apos;ve been removed from stage.
-        </div>
-      )}
-      
       {/* Hidden audio elements for WebRTC streams */}
       {peers.map(({ id, stream }) => (
         <audio
@@ -872,18 +754,6 @@ export default function AudioRoom() {
         <div className="flex flex-col gap-3">
               {messages.map((msg, idx) => {
                 const isUserOnStage = guests.some(g => g && g.id === msg.userId);
-                
-                // Debug button rendering conditions
-                if (isHost && msg.userId !== currentUser?.id) {
-                  console.log('=== BUTTON RENDERING DEBUG ===');
-                  console.log('Message user ID:', msg.userId);
-                  console.log('Current user ID:', currentUser?.id);
-                  console.log('Is host?', isHost);
-                  console.log('Is user on stage?', isUserOnStage);
-                  console.log('Should show Add to Stage?', !isUserOnStage);
-                  console.log('Should show Remove?', isUserOnStage);
-                }
-                
                 return (
                   <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
                     {msg.userId !== currentUser?.id && (
@@ -913,26 +783,14 @@ export default function AudioRoom() {
                       )}
                       {/* Add to Stage button for host on other users' messages */}
                       {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
-                        <>
-                          {console.log('RENDERING ADD TO STAGE BUTTON for user:', msg.userId)}
-                          <button
-                            onClick={() => {
-                              console.log('=== ADD TO STAGE BUTTON CLICKED ===');
-                              console.log('Button clicked for user:', msg.userId);
-                              console.log('Message user:', msg.user);
-                              console.log('Is host?', isHost);
-                              console.log('Current user:', currentUser?.id);
-                              console.log('Message user ID:', msg.userId);
-                              console.log('Is user on stage?', isUserOnStage);
-                              addUserToStageFromMessage(msg.userId, msg.user, msg.avatar);
-                            }}
-                            className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-3 py-2 text-sm border-2 border-white shadow-lg transition-opacity z-10"
-                            title="Add to Stage"
-                          >
-                            ➕ Add to Stage
-                          </button>
-                        </>
-                      )}
+                <button
+                          onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
+                          className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Add to Stage"
+                        >
+                          Add to Stage
+                        </button>
+              )}
                       {/* Remove from Stage button for host on other users' messages if user is on stage */}
                       {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
                 <button
