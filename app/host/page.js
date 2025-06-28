@@ -58,40 +58,46 @@ export default function HostHome() {
       } finally {
         setLoading(false);
       }
-
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user ?? null);
-        console.log('Auth state changed:', session);
-        if (!session) {
-          setUser(null);
-          setLoading(false);
-          return;
-        }
-        if (session?.user?.user_metadata?.role === 'host') {
-          fetchRooms(session.user.id);
-        } else {
-          setRooms([]);
-        }
-      });
-
-      return () => subscription.unsubscribe();
     };
+    
     getSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('Auth state changed:', _event, session);
+      setUser(session?.user ?? null);
+      if (!session) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+      if (session?.user?.user_metadata?.role === 'host') {
+        fetchRooms(session.user.id);
+      } else {
+        setRooms([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const fetchRooms = async (hostId) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('host_id', hostId);
+    try {
+      const { data, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('host_id', hostId);
 
-    if (error) {
-      console.error('Error fetching rooms:', error);
-    } else {
-      setRooms(data);
+      if (error) {
+        console.error('Error fetching rooms:', error);
+      } else {
+        setRooms(data);
+      }
+    } catch (err) {
+      console.error('Exception fetching rooms:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const uploadFile = async (file, bucket, base_path) => {
@@ -233,28 +239,54 @@ export default function HostHome() {
   const handleAuthAction = async () => {
     setLoading(true);
     let error;
-    if (isSignUp) {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            role: 'host',
+    try {
+      if (isSignUp) {
+        console.log('Attempting sign up with role: host');
+        const { error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              role: 'host',
+            }
           }
+        });
+        error = signUpError;
+        if (!error) {
+          console.log('Sign up successful, checking session...');
+          const { data: { session } } = await supabase.auth.getSession();
+          console.log('Session after sign up:', session);
         }
-      });
-      error = signUpError;
-    } else {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      error = signInError;
+      } else {
+        console.log('Attempting sign in...');
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        error = signInError;
+        if (!error) {
+          console.log('Sign in successful, checking session...');
+          const { data: { session } } = await supabase.auth.getSession();
+          console.log('Session after sign in:', session);
+          console.log('User metadata:', session?.user?.user_metadata);
+        }
+      }
+      if (error) {
+        console.error('Authentication error:', error);
+        alert(error.message);
+      } else {
+        // Add a small delay to ensure session is properly set
+        setTimeout(() => {
+          console.log('Refreshing page after successful authentication...');
+          window.location.reload();
+        }, 1000);
+      }
+    } catch (err) {
+      console.error('Authentication error:', err);
+      alert('An error occurred during authentication. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    if (error) {
-      alert(error.message);
-    }
-    setLoading(false);
   };
 
   const handleEditClick = (room) => {
@@ -292,10 +324,12 @@ export default function HostHome() {
   const myRooms = rooms;
 
   if (loading) {
+    console.log('Host page loading state:', { loading, user: user?.email, role: user?.user_metadata?.role });
     return <div className="flex min-h-screen items-center justify-center bg-[#1b2838] text-white">Loading...</div>;
   }
 
   if (!user) {
+    console.log('No user found, showing sign-in form');
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-[#1b2838] to-[#2a475e]">
         <div className="w-full max-w-sm p-8 space-y-6 bg-[#2a475e] rounded-xl shadow-lg border border-gray-700">
@@ -333,6 +367,7 @@ export default function HostHome() {
   }
 
   if (!loading && user && user.user_metadata?.role !== 'host') {
+    console.log('User found but not a host:', { user: user?.email, role: user?.user_metadata?.role });
     const becomeHost = async () => {
       await supabase.auth.updateUser({ data: { role: 'host' } });
       window.location.reload();
