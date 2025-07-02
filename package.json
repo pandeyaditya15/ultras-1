@@ -11,6 +11,7 @@
   "dependencies": {
     "@dicebear/collection": "^9.2.3",
     "@dicebear/core": "^9.2.3",
+    "@prisma/client": "^6.11.0",
     "@supabase/supabase-js": "^2.50.1",
     "next": "^15.3.4",
     "react": "^19.1.0",
@@ -21,6 +22,7 @@
     "@tailwindcss/postcss": "^4.1.10",
     "eslint": "^9.29.0",
     "eslint-config-next": "^15.3.4",
+    "prisma": "^6.11.0",
     "tailwindcss": "^4.1.10"
   }
 }

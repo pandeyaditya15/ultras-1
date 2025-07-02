@@ -45,20 +45,20 @@ export default function HostHome() {
   useEffect(() => {
     const getSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
         console.log('Initial session:', session);
         if (!session) {
           setUser(null);
           setLoading(false);
           return;
         }
-        if (session?.user) {
-          setUser(session.user);
+      if (session?.user) {
+        setUser(session.user);
           console.log('User set:', session.user);
-          if(session.user.user_metadata?.role === 'host') {
-            fetchRooms(session.user.id);
-          }
+        if(session.user.user_metadata?.role === 'host') {
+          fetchRooms(session.user.id);
         }
+      }
       } catch (err) {
         // Handle AuthApiError: Invalid Refresh Token
         if (err?.message?.includes('Invalid Refresh Token')) {
@@ -68,47 +68,47 @@ export default function HostHome() {
           return;
         }
       } finally {
-        setLoading(false);
+      setLoading(false);
       }
     };
     
     getSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       console.log('Auth state changed:', _event, session);
-      setUser(session?.user ?? null);
+        setUser(session?.user ?? null);
       if (!session) {
         setUser(null);
         setLoading(false);
         return;
       }
-      if (session?.user?.user_metadata?.role === 'host') {
-        fetchRooms(session.user.id);
-      } else {
-        setRooms([]);
-      }
-    });
+        if (session?.user?.user_metadata?.role === 'host') {
+          fetchRooms(session.user.id);
+        } else {
+          setRooms([]);
+        }
+      });
 
-    return () => subscription.unsubscribe();
+      return () => subscription.unsubscribe();
   }, []);
 
   const fetchRooms = async (hostId) => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('host_id', hostId);
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('host_id', hostId);
 
-      if (error) {
-        console.error('Error fetching rooms:', error);
-      } else {
-        setRooms(data);
-      }
+    if (error) {
+      console.error('Error fetching rooms:', error);
+    } else {
+      setRooms(data);
+    }
     } catch (err) {
       console.error('Exception fetching rooms:', err);
     } finally {
-      setLoading(false);
+    setLoading(false);
     }
   };
 
@@ -252,40 +252,40 @@ export default function HostHome() {
     setLoading(true);
     let error;
     try {
-      if (isSignUp) {
+    if (isSignUp) {
         console.log('Attempting sign up with role: host');
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              role: 'host',
-            }
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            role: 'host',
           }
-        });
-        error = signUpError;
+        }
+      });
+      error = signUpError;
         if (!error) {
           console.log('Sign up successful, checking session...');
           const { data: { session } } = await supabase.auth.getSession();
           console.log('Session after sign up:', session);
         }
-      } else {
+    } else {
         console.log('Attempting sign in...');
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        error = signInError;
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      error = signInError;
         if (!error) {
           console.log('Sign in successful, checking session...');
           const { data: { session } } = await supabase.auth.getSession();
           console.log('Session after sign in:', session);
           console.log('User metadata:', session?.user?.user_metadata);
         }
-      }
-      if (error) {
+    }
+    if (error) {
         console.error('Authentication error:', error);
-        alert(error.message);
+      alert(error.message);
       } else {
         // Add a small delay to ensure session is properly set
         setTimeout(() => {
@@ -297,7 +297,7 @@ export default function HostHome() {
       console.error('Authentication error:', err);
       alert('An error occurred during authentication. Please try again.');
     } finally {
-      setLoading(false);
+    setLoading(false);
     }
   };
 

@@ -24,6 +24,12 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
   const audioRefs = useRef({}); // id -> audio element
   const [roomUsers, setRoomUsers] = useState([]); // userIds on stage
   const [audioLevels, setAudioLevels] = useState({}); // id -> audio level
+  const [debugInfo, setDebugInfo] = useState({
+    signalingSub: false,
+    stageSub: false,
+    connections: 0,
+    lastSignal: null
+  });
 
   // --- 0. Set userId on client only ---
   useEffect(() => {
@@ -36,6 +42,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
   useEffect(() => {
     let stopped = false;
     if (isOnStage && typeof window !== "undefined") {
+      console.log('Getting user media for stage participant');
       navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
@@ -45,6 +52,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
       })
         .then((stream) => {
           if (!stopped) {
+            console.log('User media stream obtained');
             setMyStream(stream);
             // Set initial mute state
             stream.getAudioTracks().forEach(track => {
@@ -52,8 +60,12 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
             });
           }
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => {
+          console.error('Error getting user media:', e);
+          setError(e.message);
+        });
     } else {
+      console.log('Not on stage or window undefined, clearing stream');
       setMyStream(null);
     }
     return () => {
@@ -64,13 +76,20 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
 
   // --- 2. Maintain user list in Supabase real-time ---
   useEffect(() => {
-    if (!currentUserId || !roomId) return;
+    if (!currentUserId || !roomId) {
+      console.log('Missing currentUserId or roomId for stage presence');
+      return;
+    }
+
+    console.log('Setting up stage presence for user:', currentUserId, 'in room:', roomId);
 
     // Join/leave stage in Supabase
     const updateStagePresence = async () => {
+      try {
       if (isOnStage) {
+          console.log('Adding user to stage participants');
         // Add to stage participants
-        await supabase
+          const { error } = await supabase
           .from('room_participants')
           .upsert({
             room_id: roomId,
@@ -78,14 +97,30 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
             role_in_room: 'stage',
             joined_at: new Date().toISOString()
           }, { onConflict: 'room_id,user_id' });
+            
+          if (error) {
+            console.error('Error adding user to stage:', error);
+          } else {
+            console.log('Successfully added user to stage');
+          }
       } else {
+          console.log('Removing user from stage participants');
         // Remove from stage participants
-        await supabase
+          const { error } = await supabase
           .from('room_participants')
           .delete()
           .eq('room_id', roomId)
           .eq('user_id', currentUserId)
           .eq('role_in_room', 'stage');
+            
+          if (error) {
+            console.error('Error removing user from stage:', error);
+          } else {
+            console.log('Successfully removed user from stage');
+          }
+        }
+      } catch (error) {
+        console.error('Error updating stage presence:', error);
       }
     };
 
@@ -103,47 +138,65 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
           filter: `room_id=eq.${roomId}`
         },
         async (payload) => {
+          console.log('Stage change detected in WebRTC hook:', payload);
           if (payload.new?.role_in_room === 'stage' || payload.old?.role_in_room === 'stage') {
             // Fetch current stage users
-            const { data: stageUsers } = await supabase
+            const { data: stageUsers, error } = await supabase
               .from('room_participants')
               .select('user_id')
               .eq('room_id', roomId)
               .eq('role_in_room', 'stage');
             
+            if (error) {
+              console.error('Error fetching stage users:', error);
+              return;
+            }
+            
             const userIds = stageUsers?.map(u => u.user_id) || [];
+            console.log('Updated stage users:', userIds);
             setRoomUsers(userIds);
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Stage subscription status in WebRTC:', status);
+        setDebugInfo(prev => ({ ...prev, stageSub: status === 'SUBSCRIBED' }));
+      });
 
     return () => {
+      console.log('Cleaning up stage subscription');
       stageSubscription.unsubscribe();
     };
   }, [isOnStage, roomId, currentUserId]);
 
   // --- 3. Signaling via Supabase real-time ---
   useEffect(() => {
-    if (!isOnStage || !currentUserId || !roomId) return;
+    if (!isOnStage || !currentUserId || !roomId) {
+      console.log('Not setting up signaling - not on stage or missing data');
+      return;
+    }
 
+    console.log('Setting up signaling channel for room:', roomId);
     const signalingChannel = supabase.channel(`room_${roomId}_signaling`);
 
     // Listen for signaling messages
     signalingChannel
       .on('broadcast', { event: 'webrtc-signal' }, async (payload) => {
         const { from, to, type, data } = payload.payload;
+        console.log('Received signal:', { from, to, type, currentUserId });
         
         if (to !== currentUserId) return;
 
         let pc = connections.current[from];
         if (!pc) {
+          console.log('Creating new peer connection for:', from);
           pc = createPeerConnection(from);
           connections.current[from] = pc;
         }
 
         try {
           if (type === "offer") {
+            console.log('Processing offer from:', from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
@@ -159,34 +212,52 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
                 data: answer
               }
             });
+            console.log('Sent answer to:', from);
           } else if (type === "answer") {
+            console.log('Processing answer from:', from);
             await pc.setRemoteDescription(new RTCSessionDescription(data));
           } else if (type === "candidate") {
+            console.log('Processing ICE candidate from:', from);
             await pc.addIceCandidate(new RTCIceCandidate(data));
           }
+          
+          setDebugInfo(prev => ({ ...prev, lastSignal: new Date().toISOString() }));
         } catch (error) {
           console.error('Error handling signal:', error);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Signaling subscription status:', status);
+        setDebugInfo(prev => ({ ...prev, signalingSub: status === 'SUBSCRIBED' }));
+      });
 
     return () => {
+      console.log('Cleaning up signaling channel');
       signalingChannel.unsubscribe();
     };
   }, [isOnStage, roomId, currentUserId]);
 
   // --- 4. Connect to other users on stage ---
   useEffect(() => {
-    if (!isOnStage || !myStream || !currentUserId) return;
+    if (!isOnStage || !myStream || !currentUserId) {
+      console.log('Not connecting to peers - missing requirements');
+      return;
+    }
     
+    console.log('Connecting to peers on stage');
     setIsConnecting(true);
     
     // Connect to other users on stage
     const others = roomUsers.filter(id => id !== currentUserId);
+    console.log('Other users on stage:', others);
     
     others.forEach(async (otherId) => {
-      if (connections.current[otherId]) return; // already connected
+      if (connections.current[otherId]) {
+        console.log('Already connected to:', otherId);
+        return; // already connected
+      }
       
+      console.log('Creating connection to:', otherId);
       const pc = createPeerConnection(otherId);
       connections.current[otherId] = pc;
       
@@ -210,6 +281,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
             data: offer
           }
         });
+        console.log('Sent offer to:', otherId);
       } catch (error) {
         console.error('Error creating offer:', error);
       }
@@ -219,17 +291,20 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
     Object.keys(connections.current).forEach((id) => {
       if (id === currentUserId) return;
       if (!others.includes(id)) {
+        console.log('Removing connection to:', id);
         connections.current[id].close();
         delete connections.current[id];
         setPeers(prev => prev.filter(p => p.id !== id));
       }
     });
 
+    setDebugInfo(prev => ({ ...prev, connections: Object.keys(connections.current).length }));
     setIsConnecting(false);
   }, [isOnStage, myStream, roomUsers, currentUserId, roomId]);
 
   // --- 5. Peer connection setup ---
   function createPeerConnection(peerId) {
+    console.log('Creating peer connection for:', peerId);
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -241,6 +316,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
     // Send ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log('Sending ICE candidate to:', peerId);
         const signalingChannel = supabase.channel(`room_${roomId}_signaling`);
         signalingChannel.send({
           type: 'broadcast',
@@ -257,6 +333,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
 
     // Receive remote stream
     pc.ontrack = (event) => {
+      console.log('Received remote stream from:', peerId);
       setPeers(prev => {
         if (prev.some(p => p.id === peerId)) return prev;
         return [...prev, { 
@@ -269,11 +346,18 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
     };
 
     pc.onconnectionstatechange = () => {
+      console.log('Connection state changed for:', peerId, 'State:', pc.connectionState);
       if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
+        console.log('Removing peer:', peerId);
         setPeers(prev => prev.filter(p => p.id !== peerId));
         pc.close();
         delete connections.current[peerId];
+        setDebugInfo(prev => ({ ...prev, connections: Object.keys(connections.current).length }));
       }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state for:', peerId, 'State:', pc.iceConnectionState);
     };
 
     return pc;
@@ -283,6 +367,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
   useEffect(() => {
     peers.forEach(({ id, stream }) => {
       if (!audioRefs.current[id]) return;
+      console.log('Setting audio source for peer:', id);
       audioRefs.current[id].srcObject = stream;
     });
   }, [peers]);
@@ -291,6 +376,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
   useEffect(() => {
     if (!myStream) return;
 
+    console.log('Setting up audio level monitoring');
     const audioContext = new AudioContext();
     const analyser = audioContext.createAnalyser();
     const microphone = audioContext.createMediaStreamSource(myStream);
@@ -320,12 +406,14 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
         track.enabled = !track.enabled;
       });
       setIsMuted(!isMuted);
+      console.log('Toggled mute state:', !isMuted);
     }
   };
 
   // --- 9. Cleanup on leave ---
   useEffect(() => {
     return () => {
+      console.log('Cleaning up WebRTC connections');
       Object.values(connections.current).forEach(pc => pc.close());
       setPeers([]);
       
@@ -352,6 +440,7 @@ export function useWebRTCAudio({ roomId, isOnStage, currentUserId }) {
     toggleMute,
     isConnecting,
     audioLevels,
-    roomUsers
+    roomUsers,
+    debugInfo
   };
 } 
