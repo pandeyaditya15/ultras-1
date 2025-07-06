@@ -1,11 +1,13 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { useWebRTCAudio } from "@/utils/useWebRTCAudio";
+import { useAudioStreaming } from "@/utils/useAudioStreaming";
 import { useParams } from "next/navigation";
 import { supabase } from "@/utils/supabase";
 import { createAvatar } from '@dicebear/core';
 import { avataaars } from '@dicebear/collection';
+import Chat from '../../components/Chat';
+import AudioControls from '../../components/AudioControls';
 
 export default function AudioRoom() {
   const router = useRouter();
@@ -20,9 +22,7 @@ export default function AudioRoom() {
   const [host, setHost] = useState({ name: "Host", avatar: "" });
   const [guests, setGuests] = useState([null, null]); // 2 guests
   const [fans, setFans] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const [sendingMessage, setSendingMessage] = useState(false);
+
   // Mute state: host, guests
   const [hostMuted, setHostMuted] = useState(false);
   const [guestMuted, setGuestMuted] = useState([true, true]);
@@ -30,8 +30,7 @@ export default function AudioRoom() {
   const [showScript, setShowScript] = useState(false);
   
 
-  
-  const chatContainerRef = useRef(null);
+
 
   // Generate avatar based on user ID
   const generateAvatar = (userId) => {
@@ -417,12 +416,7 @@ export default function AudioRoom() {
     return () => profileSub.unsubscribe();
   }, [roomId, room, currentUser]);
 
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages]);
+
 
   // Cleanup when user leaves room
   useEffect(() => {
@@ -450,20 +444,23 @@ export default function AudioRoom() {
     (currentUser && room && currentUser.id === room.host_id) ||
     guests.some((g) => g && g.id === currentUser?.id);
 
-  // WebRTC audio hook
+  // Audio streaming hook
   const {
     myStream,
     peers,
-    error: audioError,
-    audioRefs,
-    userId: myUserId,
     isMuted,
-    toggleMute,
     isConnecting,
     audioLevels,
-    roomUsers,
-    debugInfo: webrtcDebugInfo
-  } = useWebRTCAudio({ roomId, isOnStage, currentUserId: currentUser?.id });
+    stageUsers,
+    startStream,
+    stopStream,
+    toggleMute
+  } = useAudioStreaming({ 
+    roomId, 
+    currentUser, 
+    isHost, 
+    isOnStage 
+  });
 
   if (loading) return <div>Loading...</div>;
   if (!room) return <div>Room not found</div>;
@@ -496,54 +493,7 @@ export default function AudioRoom() {
     });
   }
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!chatInput.trim() || !currentUser?.id || sendingMessage) return;
 
-    setSendingMessage(true);
-    try {
-      const { error } = await supabase
-        .from('room_messages')
-        .insert({
-          room_id: roomId,
-          user_id: currentUser.id,
-          message: chatInput.trim()
-        });
-
-      if (error) {
-        console.error('Error sending message:', error);
-        alert('Failed to send message');
-      } else {
-        setChatInput('');
-      }
-    } catch (err) {
-      console.error('Exception sending message:', err);
-      alert('Failed to send message');
-    } finally {
-      setSendingMessage(false);
-    }
-  };
-
-  const deleteMessage = async (messageId) => {
-    try {
-      const { error } = await supabase
-        .from('room_messages')
-        .delete()
-        .eq('id', messageId)
-        .eq('user_id', currentUser.id); // Only allow users to delete their own messages
-
-      if (error) {
-        console.error('Error deleting message:', error);
-        alert('Failed to delete message');
-      } else {
-        // Immediately update local state
-        setMessages(prev => prev.filter(msg => msg.id !== messageId));
-      }
-    } catch (err) {
-      console.error('Exception deleting message:', err);
-      alert('Failed to delete message');
-    }
-  };
 
   // Add user to stage (host action)
   async function addUserToStageFromMessage(userId, username, avatar) {
@@ -635,10 +585,10 @@ export default function AudioRoom() {
     <div className="min-h-screen bg-gradient-to-b from-[#1b2838] to-[#2a475e] p-8 text-[#c7d5e0]">
 
       {/* Hidden audio elements for WebRTC streams */}
-      {peers.map(({ id, stream }) => (
+      {Array.from(peers.entries()).map(([userId, peer]) => (
         <audio
-          key={id}
-          ref={(el) => (audioRefs.current[id] = el)}
+          key={userId}
+          id={`audio-${userId}`}
           autoPlay
           playsInline
           muted={false}
@@ -828,8 +778,10 @@ export default function AudioRoom() {
                 </button>
         </div>
 
+
+
           {/* Audience */}
-          <div className="bg-[#2a475e] p-6 rounded-xl border border-gray-700 mb-8">
+          <div className="bg-[#2a475e] p-6 rounded-xl border border-gray-700">
             <div className="flex items-center gap-2 mb-4">
               <h2 className="text-lg font-bold text-white">👥 Audience ({fans.length})</h2>
               {audienceUpdating && (
@@ -851,7 +803,7 @@ export default function AudioRoom() {
         </div>
 
         {/* Right Column (Chat) */}
-        <div className="col-span-1 bg-[#2a475e] rounded-xl flex flex-col border border-gray-700 mb-8">
+        <div className="w-[400px] min-w-[320px] max-w-[480px] h-full flex flex-col bg-[#2a475e] rounded-xl border border-gray-700 mr-8 overflow-hidden flex-1">
           <div className="p-4 border-b border-gray-700 flex items-center justify-between">
             <h2 className="text-lg font-bold text-white">💬 Chat</h2>
             <button
@@ -862,11 +814,10 @@ export default function AudioRoom() {
             </button>
           </div>
           {showScript ? (
-            // Script Box (same size as chat)
-            <div className="h-[650px] p-4 overflow-y-auto hide-scrollbar flex flex-col justify-between">
+            <div className="flex-1 p-4 overflow-y-auto hide-scrollbar flex flex-col justify-between min-h-0">
               <div>
                 <h3 className="text-xl font-bold text-white mb-4">🎤 Host Script</h3>
-                <div className="bg-[#1b2838] rounded-lg p-4 text-[#c7d5e0] text-base whitespace-pre-line" style={{ minHeight: '500px' }}>
+                <div className="bg-[#1b2838] rounded-lg p-4 text-[#c7d5e0] text-base whitespace-pre-line min-h-[500px]">
                   {`Welcome to today's Manchester City room!
 
 👋 Intro:
@@ -901,97 +852,35 @@ Let's keep it positive, insightful, and full of City spirit! 💙`}
               </div>
             </div>
           ) : (
-            // Chat Box
-            <>
-              <div 
-                ref={chatContainerRef}
-                className="h-[650px] p-4 overflow-y-auto hide-scrollbar"
-              >
-                {/* Messages */}
-                <div className="flex flex-col gap-3">
-                  {messages.map((msg, idx) => {
-                    const isUserOnStage = guests.some(g => g && g.id === msg.userId);
-                    return (
-                      <div key={msg.id || idx} className={`flex gap-2 ${msg.userId === currentUser?.id ? 'justify-end' : 'justify-start'}`}>
-                        {msg.userId !== currentUser?.id && (
-                          <img 
-                            src={msg.avatar || "/default-avatar.png"} 
-                            alt={msg.user} 
-                            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                          />
-                        )}
-                        <div className={`rounded-lg p-3 max-w-xs relative group ${msg.userId === currentUser?.id ? 'bg-[#4f94bc] text-white' : 'bg-[#1b2838] text-[#c7d5e0]'}`}>
-                          {msg.userId !== currentUser?.id && (
-                            <p className="text-xs font-bold text-[#66c0f4] mb-1">{msg.user}</p>
-                          )}
-                          {msg.userId === currentUser?.id && (
-                            <p className="text-xs font-bold text-white mb-1">You</p>
-                          )}
-                          <p className="text-sm">{msg.text}</p>
-                          {/* Delete button for user's own messages */}
-                          {msg.userId === currentUser?.id && (
-                            <button
-                              onClick={() => deleteMessage(msg.id)}
-                              className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="Delete message"
-                            >
-                              ×
-                            </button>
-                          )}
-                          {/* Add to Stage button for host on other users' messages */}
-                          {isHost && msg.userId !== currentUser?.id && !isUserOnStage && (
-                            <button
-                              onClick={() => addUserToStageFromMessage(msg.userId, msg.user, msg.avatar)}
-                              className="absolute -top-2 -left-2 bg-green-500 hover:bg-green-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                              title="Add to Stage"
-                            >
-                              Add to Stage
-                            </button>
-                          )}
-                          {/* Remove from Stage button for host on other users' messages if user is on stage */}
-                          {isHost && msg.userId !== currentUser?.id && isUserOnStage && (
-                            <button
-                              onClick={() => removeUserFromStageFromMessage(msg.userId)}
-                              className="absolute -top-2 -left-2 bg-red-500 hover:bg-red-600 text-white rounded-full px-2 py-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                              title="Remove from Stage"
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {messages.length === 0 && (
-                    <div className="text-center py-8">
-                      <p className="text-sm text-[#8f98a0]">No messages yet. Start the conversation!</p>
-                    </div>
-                  )}
-                </div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              {/* Chat messages area (scrollable) */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <Chat 
+                  roomId={roomId} 
+                  user={currentUser} 
+                  isHost={isHost}
+                  onAddToStage={addUserToStageFromMessage}
+                  onRemoveFromStage={removeUserFromStageFromMessage}
+                  stageUsers={stageUsers}
+                />
               </div>
-              <div className="p-4 border-t border-gray-700">
-                <form onSubmit={handleSendMessage} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Type a message..."
-                    disabled={sendingMessage}
-                    className="flex-grow bg-[#1b2838] border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#66c0f4] disabled:opacity-50"
-                  />
-                  <button
-                    type="submit"
-                    disabled={sendingMessage || !chatInput.trim()}
-                    className="px-6 py-2 bg-[#4f94bc] text-white rounded-lg hover:bg-[#66c0f4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {sendingMessage ? 'Sending...' : 'Send'}
-                  </button>
-                </form>
-              </div>
-            </>
+              {/* Chat input is always pinned to the bottom inside Chat component */}
+            </div>
           )}
         </div>
       </div>
+
+      {/* Audio Controls - Only show when on stage */}
+      {isOnStage && (
+        <AudioControls
+          isMuted={isMuted}
+          onToggleMute={toggleMute}
+          isConnecting={isConnecting}
+          audioLevel={audioLevels[currentUser?.id] || 0}
+          isOnStage={isOnStage}
+          isHost={isHost}
+        />
+      )}
     </div>
   );
 } 
